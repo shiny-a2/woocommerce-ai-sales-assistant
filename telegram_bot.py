@@ -3,6 +3,8 @@ from __future__ import annotations
 
 import asyncio
 import base64
+import json
+import os
 
 import httpx
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
@@ -15,8 +17,6 @@ from telegram.ext import (
     MessageHandler,
     filters,
 )
-
-import json
 
 import assistant
 import botusers
@@ -36,7 +36,57 @@ def _full_name(user):
     return nm.strip()
 
 
-_sent_cards = {}  # message_id کارتِ ارسال‌شده → {id, name, reference, url}
+# کارت‌های ارسال‌شده (برای تشخیصِ «ریپلای به کارت») — ماندگار روی دیسک تا با ری‌استارت نپرد.
+_SENT_CARDS_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "data", "sent_cards.json")
+_sent_cards = {}  # "chat_id:message_id" → {id, name, reference, url}
+
+
+def _save_sent_cards():
+    try:
+        if len(_sent_cards) > 1500:  # فقط ۱۲۰۰ کارتِ آخر را نگه دار
+            for k in list(_sent_cards)[:-1200]:
+                _sent_cards.pop(k, None)
+        os.makedirs(os.path.dirname(_SENT_CARDS_PATH), exist_ok=True)
+        with open(_SENT_CARDS_PATH, "w", encoding="utf-8") as f:
+            json.dump(_sent_cards, f, ensure_ascii=False)
+    except Exception as e:  # noqa: BLE001
+        print(f"[tg] ذخیرهٔ sent_cards ناموفق: {e}")
+
+
+try:
+    with open(_SENT_CARDS_PATH, encoding="utf-8") as _f:
+        _sent_cards = json.load(_f)
+except Exception:  # noqa: BLE001
+    _sent_cards = {}
+
+
+def _card_from_message(rep):
+    """اگر کارت در حافظه نبود، محصول را از خودِ پیامِ ریپلای‌شده (کپشن + دکمهٔ لینک) دربیاور."""
+    if not rep:
+        return None
+    cap = (getattr(rep, "caption", None) or getattr(rep, "text", None) or "")
+    name = ""
+    for line in cap.splitlines():
+        s = line.strip()
+        if s.startswith("⌚"):
+            name = s.lstrip("⌚").strip()
+            break
+    url = ""
+    try:
+        for row in (rep.reply_markup.inline_keyboard if rep.reply_markup else []):
+            for btn in row:
+                if getattr(btn, "url", None):
+                    url = btn.url
+                    break
+            if url:
+                break
+    except Exception:  # noqa: BLE001
+        pass
+    if name or url:
+        return {"id": None, "name": name, "reference": "", "url": url}
+    return None
+
+
 _PRODUCT_HINTS = (
     "ساعت", "ساعتی", "واچ", "می‌خوام", "میخوام", "خواستم", "می‌خواستم", "مدل",
     "اتوماتیک", "کوارتز", "تخفیف", "حراج", "آف", "پیشنهاد", "معرفی", "زنانه",
@@ -170,13 +220,11 @@ async def _send_cards(context, msg, cards):
             except Exception:
                 pass
         if sent is not None:  # ردیابی: تا اگر مشتری به این کارت ریپلای کرد، محصول را بشناسیم
-            _sent_cards[sent.message_id] = {
+            _sent_cards[f"{msg.chat_id}:{sent.message_id}"] = {
                 "id": c.get("id"), "name": c.get("name", ""),
                 "reference": c.get("reference", ""), "url": c.get("url", ""),
             }
-            if len(_sent_cards) > 600:
-                for k in list(_sent_cards)[:200]:
-                    _sent_cards.pop(k, None)
+    _save_sent_cards()  # ماندگار روی دیسک (پس از ری‌استارت هم کارت‌های قبلی شناخته شوند)
 
 
 async def _save_name_to_crm(user, nu):
@@ -443,15 +491,18 @@ async def _on_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = msg.text
     # اگر به کارتِ محصول ریپلای کرده:
     if msg.reply_to_message:
-        prod = _sent_cards.get(msg.reply_to_message.message_id)
+        prod = (_sent_cards.get(f"{msg.chat_id}:{msg.reply_to_message.message_id}")
+                or _card_from_message(msg.reply_to_message))  # fallback از خودِ کارت برای کارت‌های قدیمی
         if prod:
-            # درخواستِ عکس/ویدئوی روی مچ → همین محصول را قطعی تحویل بده (بدون اتکا به مدل)
-            if _wants_wrist(msg.text):
+            # درخواستِ عکس/ویدئوی روی مچ + آیدیِ مشخص → همین محصول را قطعی تحویل بده
+            if prod.get("id") and _wants_wrist(msg.text):
                 await context.bot.send_chat_action(chat_id=msg.chat_id, action=ChatAction.TYPING)
                 await _handle_wrist(context, msg, user, prod["id"])
                 return
-            # وگرنه همان محصول را به مدل بشناسان (دیگر اسم/مشخصات نپرسد)
-            text = f"(مشتری به این محصول اشاره دارد: {prod['name']} — آیدی {prod['id']}) " + text
+            # همان محصول را به مدل بشناسان (دیگر اسم/مشخصات نپرسد)
+            ref = (f" — آیدی {prod['id']}" if prod.get("id")
+                   else (f" — لینک {prod['url']}" if prod.get("url") else ""))
+            text = f"(مشتری به این محصول اشاره دارد: {prod.get('name','')}{ref}) " + text
 
     await context.bot.send_chat_action(chat_id=msg.chat_id, action=ChatAction.TYPING)
     # پیامِ موقت تا کاربر حس سرگردانی نکند (پاسخ کمی زمان می‌برد)

@@ -75,7 +75,7 @@ SCHEMAS = [
                     "dial_color": {"type": "string", "description": "رنگ صفحه، مثل «سبز»، «مشکی»، «سفید»"},
                     "strap_color": {"type": "string", "description": "رنگ بند"},
                     "case_color": {"type": "string", "description": "رنگ قاب"},
-                    "strap_material": {"type": "string", "description": "جنس بند، مثل «استیل»، «چرم»، «سیلیکون»"},
+                    "strap_material": {"type": "string", "description": "نوعِ بند به‌صورتِ ساده: «چرم» یا «فلزی»/«استیل» یا «سیلیکون»/«رابر» یا «پارچه». همان واژهٔ سادهٔ مشتری را بده؛ سیستم خودش انواعِ تخصصی (پین‌بند، حصیربافت، زنجیری، رزین، برزنت…) را در دستهٔ درست قرار می‌دهد."},
                     "brand": {"type": "string", "description": "نام برند، مثل «سیتیزن»، «دنیل کلین»"},
                     "style": {"type": "string", "enum": ["کلاسیک", "اسپرت", "فشن", "لاکچری", "غواصی", "دیجیتال"], "description": "استایل"},
                     "min_toman": {"type": "integer", "description": "حداقل بودجه اگر مشتری بازه داد"},

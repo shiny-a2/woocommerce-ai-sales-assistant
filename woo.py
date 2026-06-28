@@ -295,6 +295,22 @@ _WATCH_ATTR = {
     "case_color": (203, "pa_رنگ-قاب"),
     "brand": (103, "pa_نام-برند"),   # برندِ واقعی؛ pa_برند فقط «نمونه» است
     "style": (106, "pa_استایل"),
+    "strap_material": (115, "pa_طرح-بند"),  # نوعِ واقعیِ بند (چرم/پین‌بند/رابر/…)
+}
+# هم‌معنی‌های بند → دستهٔ استانداردِ ما (استیل=فلزی، سیلیکون=رابر/پلاستیک، پارچه=برزنت)
+_STRAP_MAT = {
+    "فلزی": "استیل", "فلز": "استیل", "متال": "استیل", "استیلی": "استیل", "فلزى": "استیل",
+    "چرمی": "چرم",
+    "لاستیک": "سیلیکون", "لاستیکی": "سیلیکون", "رابر": "سیلیکون", "ژله‌ای": "سیلیکون",
+    "پلاستیک": "سیلیکون", "پلاستیکی": "سیلیکون",
+    "پارچه": "پارچه", "پارچه‌ای": "پارچه", "نخی": "پارچه", "کتان": "پارچه", "برزنت": "پارچه",
+}
+# دستهٔ بند → مقادیرِ «طرح بند» که باید شامل‌شان شود (فلزی در طرح‌بند به‌شکلِ پین‌بند/حصیربافت/زنجیری/… است)
+_STRAP_DESIGN = {
+    "چرم": ["چرم"],
+    "استیل": ["پین بند", "حصیربافت", "زنجیری", "دستبندی"],
+    "سیلیکون": ["رابر", "سیلیکون", "پلاستیک", "رزین"],
+    "پارچه": ["برزنت", "پارچه"],
 }
 _TERMS_CACHE = {}
 
@@ -315,6 +331,13 @@ async def _match_term_ids(attr_id, value):
     if exact:
         return exact
     return [t["id"] for t in terms if value in t["name"] or t["name"].strip() in value]
+
+
+async def _strap_design_ids(material):
+    """آیدیِ مقادیرِ «طرح بند» منطبق با دستهٔ بند (چرم/استیل/سیلیکون)."""
+    designs = _STRAP_DESIGN.get(material, [material])
+    terms = await _cached_terms(115)  # pa_طرح-بند
+    return [t["id"] for t in terms if any(d in t["name"] for d in designs)]
 
 
 def _gender_ok(brief, gender):
@@ -355,6 +378,9 @@ async def search_watches(gender=None, movement=None, dial_color=None, strap_colo
     if target_toman and not min_toman and not max_toman:
         min_toman = int(int(target_toman) * 0.90)
         max_toman = int(int(target_toman) * 1.15)
+    # نرمال‌سازیِ جنسِ بند (فلزی→استیل، چرمی→چرم، …)
+    if strap_material:
+        strap_material = _STRAP_MAT.get(strap_material.strip(), strap_material.strip())
 
     params = {"status": "publish", "orderby": "popularity", "order": "desc", "per_page": 60}
     if in_stock_only:
@@ -369,10 +395,11 @@ async def search_watches(gender=None, movement=None, dial_color=None, strap_colo
     # یک فیلترِ گزینشی به‌عنوان مبنای کوئری (محدودیت تک‌ویژگیِ ووکامرس)
     primary = None
     for key, val in (("dial_color", dial_color), ("movement", movement), ("brand", brand),
-                     ("style", style), ("strap_color", strap_color), ("case_color", case_color)):
+                     ("style", style), ("strap_color", strap_color), ("case_color", case_color),
+                     ("strap_material", strap_material)):
         if val:
             attr_id, taxonomy = _WATCH_ATTR[key]
-            ids = await _match_term_ids(attr_id, val)
+            ids = await _strap_design_ids(val) if key == "strap_material" else await _match_term_ids(attr_id, val)
             if ids:
                 params["attribute"] = taxonomy
                 params["attribute_term"] = ",".join(str(i) for i in ids)
@@ -421,11 +448,18 @@ async def search_watches(gender=None, movement=None, dial_color=None, strap_colo
         sc = _strict("رنگ قاب", case_color)
         if sc:
             rows = sc
-    # جنس بند (مثلاً استیل): فقط همان جنسِ تک‌مقدار (نه ترکیبیِ استیل+چرم)
+    # نوعِ بند (چرم/استیل/سیلیکون): اگر مشتری گفت، هرگز نوعِ دیگری نشان نده.
+    # «طرح بند» اتریبیوتِ اصلیِ بند است (چرم/پین‌بند/رابر/…)؛ «جنس بکارگرفته» هم به‌عنوانِ پشتیبان.
     if strap_material:
-        sm = [r for r in rows if attr_options(r[1], "جنس بکارگرفته") == [strap_material]]
-        if sm:
-            rows = sm
+        _designs = _STRAP_DESIGN.get(strap_material, [strap_material])
+
+        def _strap_ok(p):
+            td = attr_options(p, "طرح بند")
+            if any(any(d in (o or "") for d in _designs) for o in td):
+                return True
+            return any(strap_material in (o or "") for o in attr_options(p, "جنس بکارگرفته"))
+
+        rows = [r for r in rows if _strap_ok(r[1])]
 
     # اولویت‌بندیِ نمایش: اول «ارسال فوری» (موجودیِ فروشگاه)، بعد گارانتیِ نامحسوسِ جواهرتایم
     def _jewel(p):
