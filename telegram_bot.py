@@ -14,11 +14,14 @@ from telegram.ext import (
     filters,
 )
 
+import json
+
 import assistant
 import botusers
 import config
 import llm
 import sessions
+import tools
 
 CHANNEL = "telegram"
 _name_pushed = set()  # کاربرانی که نامِ تلگرامی‌شان یک‌بار به CRM رفته
@@ -32,14 +35,49 @@ def _full_name(user):
 
 
 _sent_cards = {}  # message_id کارتِ ارسال‌شده → {id, name, reference, url}
-_PRODUCT_HINTS = ("ساعت", "می‌خوام", "میخوام", "مدل", "اتوماتیک", "کوارتز", "تخفیف",
-                  "حراج", "پیشنهاد", "زنانه", "مردانه", "اسپرت", "کلاسیک", "بودجه",
-                  "میلیون", "برند", "رنگ", "بند", "موجود")
+_PRODUCT_HINTS = (
+    "ساعت", "ساعتی", "واچ", "می‌خوام", "میخوام", "خواستم", "می‌خواستم", "مدل",
+    "اتوماتیک", "کوارتز", "تخفیف", "حراج", "آف", "پیشنهاد", "معرفی", "زنانه",
+    "مردانه", "بچگانه", "ست", "اسپرت", "کلاسیک", "فشن", "لاکچری", "بودجه",
+    "میلیون", "تومان", "تومن", "قیمت", "چنده", "برند", "رنگ", "بند", "قاب",
+    "صفحه", "موجود", "دارید", "دارین", "هست", "کادو", "هدیه", "سفارش", "ببینم",
+    "نشون", "دنبال", "سیتیزن", "کاسیو", "اورینت", "کلود", "برنارد", "سواچ",
+    "عقربه", "کرنوگراف", "طلایی", "نقره", "مشکی", "سفید", "آبی",
+)
+_GREETINGS = {
+    "سلام", "درود", "سلام علیکم", "علیک", "علیک سلام", "خوبی", "چطوری",
+    "حالت چطوره", "ممنون", "مرسی", "تشکر", "سپاس", "خداحافظ", "بای",
+    "اوکی", "اوکیه", "باشه", "چشم", "بله", "نه", "ها", "ok", "hi", "hello",
+}
+
+
+def _norm(text):
+    return (text or "").strip().rstrip("؟?!.،ـ \n")
+
+
+def _is_smalltalk(text):
+    t = _norm(text)
+    return len(t) < 3 or t in _GREETINGS
 
 
 def _looks_like_product(text):
     t = text or ""
     return any(h in t for h in _PRODUCT_HINTS)
+
+
+def _interim_text(text):
+    if _looks_like_product(text):
+        return "چشم 🔎 بذار بهترین گزینه‌ها رو برات پیدا کنم…"
+    return "چشم 🙏 الان برات بررسی می‌کنم…"
+
+
+def _wants_wrist(text):
+    t = text or ""
+    for kw in ("مچ", "روی مج", "رو مج", "مج دست", "مج‌دست", "روی دست", "رو دست",
+               "روی دستم", "رو دستم", "روی دستش"):
+        if kw in t:
+            return True
+    return False
 
 _WELCOME = (
     "سلام و وقت‌بخیر 🌟\n"
@@ -201,23 +239,49 @@ async def _deliver(context, msg, user, source_text, answer, ctx):
         await _notify_admins(context, user, source_text, ctx["handoff"])
 
 
+async def _handle_wrist(context, msg, user, product_id):
+    """تحویلِ قطعیِ عکس/ویدئوی مچ‌دست برای محصولِ مشخص — مستقل از مدل (تا وعدهٔ توخالی ندهد)."""
+    ctx = {}
+    try:
+        res = json.loads(await tools.dispatch("get_wrist_media", json.dumps({"product_id": product_id}), ctx))
+    except Exception:  # noqa: BLE001
+        res = {}
+    if ctx.get("wrist_media"):
+        answer = "چشم 🙌 اینم عکس و ویدئوی روی مچ‌دستِ همین ساعت، ببین چطور می‌شینه:"
+    elif ctx.get("wrist_media_request"):
+        answer = ("چشم 🙌 الان از همکارام می‌خوام عکس و ویدئوی روی مچ‌دستِ همین ساعت رو بگیرن؛ "
+                  "به‌محضِ آماده‌شدن همین‌جا برات می‌فرستم 🙏")
+    elif res.get("company_stock"):
+        answer = ("این مدل از موجودیِ شرکتِ واردکننده‌ست و فعلاً امکانِ عکس/ویدئوی روی مچ‌دست براش نداریم 🙏 "
+                  "ولی همهٔ مشخصاتش رو با کمال میل برات می‌گم.")
+    else:
+        answer = "فعلاً عکس/ویدئوی روی مچِ این مدل رو ندارم 🙏 ولی مشخصاتِ کامل و لینکش رو برات می‌فرستم."
+    await _deliver(context, msg, user, msg.text, answer, ctx)
+
+
 async def _on_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     msg = update.effective_message
     if not msg or not msg.text:
         return
     user = update.effective_user
     text = msg.text
-    # اگر به کارتِ محصول ریپلای کرده، همان محصول را به مدل بشناسان (دیگر اسم نپرسد)
+    # اگر به کارتِ محصول ریپلای کرده:
     if msg.reply_to_message:
         prod = _sent_cards.get(msg.reply_to_message.message_id)
         if prod:
+            # درخواستِ عکس/ویدئوی روی مچ → همین محصول را قطعی تحویل بده (بدون اتکا به مدل)
+            if _wants_wrist(msg.text):
+                await context.bot.send_chat_action(chat_id=msg.chat_id, action=ChatAction.TYPING)
+                await _handle_wrist(context, msg, user, prod["id"])
+                return
+            # وگرنه همان محصول را به مدل بشناسان (دیگر اسم/مشخصات نپرسد)
             text = f"(مشتری به این محصول اشاره دارد: {prod['name']} — آیدی {prod['id']}) " + text
 
     await context.bot.send_chat_action(chat_id=msg.chat_id, action=ChatAction.TYPING)
-    # پیامِ موقت تا کاربر حس سرگردانی نکند (جستجوی محصول کمی زمان می‌برد)
-    if _looks_like_product(msg.text):
+    # پیامِ موقت تا کاربر حس سرگردانی نکند (پاسخ کمی زمان می‌برد)
+    if not _is_smalltalk(msg.text):
         try:
-            await msg.reply_text("چشم 🔎 بذار بهترین گزینه‌ها رو برات پیدا کنم…")
+            await msg.reply_text(_interim_text(msg.text))
         except Exception:
             pass
 
