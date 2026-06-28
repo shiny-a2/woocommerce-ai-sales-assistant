@@ -223,6 +223,7 @@ async def _send_cards(context, msg, cards):
             _sent_cards[f"{msg.chat_id}:{sent.message_id}"] = {
                 "id": c.get("id"), "name": c.get("name", ""),
                 "reference": c.get("reference", ""), "url": c.get("url", ""),
+                "warranty": c.get("warranty", ""), "warranty_provider": c.get("warranty_provider", ""),
             }
     _save_sent_cards()  # ماندگار روی دیسک (پس از ری‌استارت هم کارت‌های قبلی شناخته شوند)
 
@@ -499,10 +500,14 @@ async def _on_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 await context.bot.send_chat_action(chat_id=msg.chat_id, action=ChatAction.TYPING)
                 await _handle_wrist(context, msg, user, prod["id"])
                 return
-            # همان محصول را به مدل بشناسان (دیگر اسم/مشخصات نپرسد)
+            # همان محصول را به مدل بشناسان (دیگر اسم/مشخصات نپرسد) + گارانتی را هم بده
             ref = (f" — آیدی {prod['id']}" if prod.get("id")
                    else (f" — لینک {prod['url']}" if prod.get("url") else ""))
-            text = f"(مشتری به این محصول اشاره دارد: {prod.get('name','')}{ref}) " + text
+            specs = ""
+            if prod.get("warranty") or prod.get("warranty_provider"):
+                specs = (f" — گارانتی: {prod.get('warranty') or '—'}"
+                         f" — گارانتی‌کننده در ایران: {prod.get('warranty_provider') or '—'}")
+            text = f"(مشتری به این محصول اشاره دارد: {prod.get('name','')}{ref}{specs}) " + text
 
     await context.bot.send_chat_action(chat_id=msg.chat_id, action=ChatAction.TYPING)
     # پیامِ موقت تا کاربر حس سرگردانی نکند (پاسخ کمی زمان می‌برد)
