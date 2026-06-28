@@ -1,0 +1,35 @@
+# ---- Secrets & environment ----
+.env
+*.env
+!.env.example
+
+# ---- Data, databases, Telegram sessions (NEVER commit) ----
+data/*
+!data/sample_contacts.csv
+*.db
+*.sqlite
+*.sqlite3
+*.session
+*.session-journal
+.login_state.json
+
+# ---- Logs ----
+*.log
+logs/
+
+# ---- Python ----
+.venv/
+venv/
+env/
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# ---- OS / editors ----
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/

@@ -1,0 +1,150 @@
+# WooCommerce AI Sales Assistant
+
+> An AI sales consultant for WooCommerce stores that talks to customers on **Telegram** and a **website chat widget** — it searches the live catalog, understands photos and voice notes, and guides the buyer all the way to checkout. It never invents a price or stock level; every product fact is pulled live from the store.
+
+Built with OpenAI function-calling on top of the WooCommerce REST API. Developed and deployed in production for an online retailer.
+
+---
+
+## Why it's interesting
+
+Most "store chatbots" are FAQ parrots. This one behaves like a real sales associate:
+
+- **Grounded, never hallucinated** — the model is not allowed to state a price, stock status, or spec from memory. Every claim goes through a tool call to the live store, so answers stay correct as inventory changes.
+- **Attribute-aware product search** — instead of naive keyword matching, it filters by the store's real product attributes (movement, dial/strap/case color, material, brand, style) and resolves customer gender intent from **category + title** rather than unreliable attribute terms.
+- **Multimodal** — a customer can send a **photo** ("do you have one like this?") or a **voice note**; the assistant uses vision + speech-to-text and continues the conversation naturally.
+- **Channel-agnostic core** — the same brain answers on Telegram and on the website chat widget. Adding a new channel is a thin adapter.
+
+---
+
+## Features
+
+**Conversational selling**
+- Asks the right qualifying questions (recipient, budget, movement, brand, style) before recommending — one at a time, not a form.
+- Budget logic: a single number ("around 20M") becomes a sensible range (−10% / +15%); an explicit range is respected.
+- Progressive discovery: first turn shows ~7 options, then 5 new, then 3 new, then a filtered store link — never repeating items already shown.
+- Rich **product cards** (photo + price + "View on site" button) in Telegram.
+
+**Grounded catalog access (via tools)**
+- Live product search with attribute, category and price filters.
+- Full product detail lookup (specs, description, stock, shipping time).
+- Order-status lookup that is **phone-gated** — order details are never revealed without a matching phone number.
+
+**Multimodal**
+- Vision: recognizes a product from a photo (color, shape, brand if visible) and finds the closest matches.
+- Voice: transcribes voice notes and answers them like text.
+
+**Engagement & handoff**
+- On-request photo/video delivery for a specific product to help the customer decide.
+- Captures the customer's name to enrich their CRM profile.
+- Clean escalation to a human operator (admin alert) for anything out of scope.
+
+**Operations**
+- Self-healing supervisor loop; survives crashes and keeps running.
+- Timezone-stamped logging.
+- Deployable as a Windows Scheduled Task or any always-on host.
+
+---
+
+## Architecture
+
+```
+                 ┌──────────────┐        ┌──────────────┐
+   Telegram ───▶ │ telegram_bot │        │  web_server  │ ◀─── Website chat widget
+                 └──────┬───────┘        └──────┬───────┘      (embeddable JS) / CRM
+                        │                       │
+                        ▼                       ▼
+                 ┌─────────────────────────────────────┐
+                 │            assistant.py              │   channel-agnostic core
+                 │   (history, name hints, delivery)    │
+                 └───────────────────┬─────────────────┘
+                                     ▼
+                 ┌─────────────────────────────────────┐
+                 │       llm.py  (function-calling)     │
+                 │   model ↔ tools loop, vision, STT    │
+                 └───────────────────┬─────────────────┘
+                                     ▼
+                 ┌─────────────────────────────────────┐
+                 │     tools.py  →  woo.py (REST)       │   grounded data access
+                 │  search / detail / order / media    │
+                 └─────────────────────────────────────┘
+```
+
+The model can only affect the world through the tools defined in `tools.py`. That boundary is what keeps it honest.
+
+---
+
+## Tech stack
+
+- **Python 3.12**
+- **OpenAI** Chat Completions — function calling, vision, and Whisper transcription
+- **python-telegram-bot** for the Telegram channel
+- **FastAPI + Uvicorn** for the website chat backend and embeddable widget
+- **WooCommerce REST API** as the single source of truth for catalog, stock and orders
+- **httpx** for async HTTP
+
+---
+
+## Project structure
+
+| File | Role |
+|------|------|
+| `config.py` | Loads configuration from `.env` |
+| `woo.py` | WooCommerce client — products, categories, attribute-aware search, orders |
+| `persona.py` | System prompt / sales persona + `store_info.md` loader |
+| `tools.py` | OpenAI tool schemas + dispatch to the store |
+| `llm.py` | The model ↔ tools loop, including vision and voice |
+| `sessions.py` | Per-conversation memory |
+| `assistant.py` | Channel-agnostic response core |
+| `telegram_bot.py` | Telegram channel adapter |
+| `web_server.py` | Website chat backend + embeddable widget + CRM endpoints |
+| `textfmt.py` | Output cleanup for chat surfaces |
+| `main.py` | Entry point + self-healing supervisor |
+
+---
+
+## Setup
+
+```bash
+python -m venv .venv
+.venv/Scripts/python -m pip install -r requirements.txt    # Windows
+# or: .venv/bin/python -m pip install -r requirements.txt  # Linux/macOS
+
+cp .env.example .env        # then fill in your keys
+python selftest.py          # verify connections
+python main.py              # run
+```
+
+### Configuration (`.env`)
+
+| Variable | Description |
+|----------|-------------|
+| `TELEGRAM_BOT_TOKEN` | Bot token from BotFather |
+| `ADMIN_USER_IDS` | Numeric admin IDs (comma-separated) for handoff alerts |
+| `WOO_URL`, `WOO_CK`, `WOO_CS` | WooCommerce REST credentials (read-only is enough) |
+| `OPENAI_API_KEY`, `OPENAI_MODEL` | OpenAI key + model (default `gpt-4o-mini`) |
+| `MONEY_DIVISOR`, `CURRENCY_LABEL` | Price display (e.g. store keeps Rial, displays Toman) |
+| `WEB_PORT`, `WEB_ALLOWED_ORIGINS` | Website chat backend port + allowed origins |
+
+Store-specific facts (hours, shipping, warranty, tone) live in `store_info.md`, which is injected directly into the assistant's context — edit that file to retune behavior without touching code.
+
+### Embedding the website chat
+
+Expose the backend (sub-domain or tunnel to `WEB_PORT`), then add before `</body>`:
+
+```html
+<script src="https://YOUR-CHAT-DOMAIN/embed.js" defer></script>
+```
+
+and allow your site's domain in `WEB_ALLOWED_ORIGINS`.
+
+---
+
+## Notes
+
+- Comments and the sales persona are written in Persian, matching the original deployment's audience. The architecture and tooling are language-agnostic.
+- No secrets, credentials, or customer data are included in this repository — only `.env.example` placeholders.
+
+## License
+
+MIT — see [LICENSE](LICENSE).
