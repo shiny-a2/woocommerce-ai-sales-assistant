@@ -24,6 +24,7 @@ import config
 import llm
 import sessions
 import tools
+import woo
 
 CHANNEL = "telegram"
 _name_pushed = set()  # کاربرانی که نامِ تلگرامی‌شان یک‌بار به CRM رفته
@@ -483,6 +484,34 @@ async def _handle_wrist(context, msg, user, product_id):
     await _deliver(context, msg, user, msg.text, answer, ctx)
 
 
+async def _resolve_product_id(name):
+    """آیدیِ محصول را از روی نامِ کارت پیدا می‌کند (برای کارت‌های قدیمی که آیدی ذخیره ندارند)."""
+    try:
+        items = await woo.search_by_reference(name, limit=1)
+        return items[0].get("id") if items else None
+    except Exception:  # noqa: BLE001
+        return None
+
+
+async def _product_specs_text(product_id):
+    """شیتِ مشخصاتِ کاملِ یک محصول (نام/قیمت/ارسال + همهٔ ویژگی‌ها) برای تزریق به context."""
+    try:
+        p = await woo.get_product(product_id)
+    except Exception:  # noqa: BLE001
+        return ""
+    parts = [p.get("name", "")]
+    if p.get("price_label"):
+        parts.append("قیمت: " + p["price_label"])
+    if p.get("shipping_time"):
+        parts.append("ارسال: " + p["shipping_time"])
+    for a in (p.get("attributes") or []):
+        nm = (a.get("name") or "").strip()
+        opts = a.get("options") or []
+        if nm and opts:
+            parts.append(f"{nm}: " + "، ".join(str(o) for o in opts))
+    return " | ".join(x for x in parts if x)
+
+
 async def _on_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     msg = update.effective_message
     if not msg or not msg.text:
@@ -495,19 +524,25 @@ async def _on_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         prod = (_sent_cards.get(f"{msg.chat_id}:{msg.reply_to_message.message_id}")
                 or _card_from_message(msg.reply_to_message))  # fallback از خودِ کارت برای کارت‌های قدیمی
         if prod:
-            # درخواستِ عکس/ویدئوی روی مچ + آیدیِ مشخص → همین محصول را قطعی تحویل بده
-            if prod.get("id") and _wants_wrist(msg.text):
+            pid = prod.get("id")
+            if not pid and prod.get("name"):  # کارتِ قدیمی: آیدی را از نامِ کارت پیدا کن
+                pid = await _resolve_product_id(prod["name"])
+            # درخواستِ عکس/ویدئوی روی مچ → همین محصول را قطعی تحویل بده
+            if pid and _wants_wrist(msg.text):
                 await context.bot.send_chat_action(chat_id=msg.chat_id, action=ChatAction.TYPING)
-                await _handle_wrist(context, msg, user, prod["id"])
+                await _handle_wrist(context, msg, user, pid)
                 return
-            # همان محصول را به مدل بشناسان (دیگر اسم/مشخصات نپرسد) + گارانتی را هم بده
-            ref = (f" — آیدی {prod['id']}" if prod.get("id")
-                   else (f" — لینک {prod['url']}" if prod.get("url") else ""))
-            specs = ""
-            if prod.get("warranty") or prod.get("warranty_provider"):
-                specs = (f" — گارانتی: {prod.get('warranty') or '—'}"
-                         f" — گارانتی‌کننده در ایران: {prod.get('warranty_provider') or '—'}")
-            text = f"(مشتری به این محصول اشاره دارد: {prod.get('name','')}{ref}{specs}) " + text
+            # هر سؤالِ دیگر دربارهٔ این محصول: مشخصاتِ کامل را قطعی بگیر و تزریق کن (مستقل از مدل)
+            if pid:
+                await context.bot.send_chat_action(chat_id=msg.chat_id, action=ChatAction.TYPING)
+                sheet = await _product_specs_text(pid)
+                if sheet:
+                    text = (f"(مشتری دربارهٔ همین محصول می‌پرسد. مشخصاتِ کاملش: {sheet}. "
+                            f"فقط از همین مشخصات جواب بده و اسم/مشخصات نپرس.) " + text)
+                else:
+                    text = f"(مشتری دربارهٔ محصولِ آیدی {pid} می‌پرسد؛ با get_product({pid}) جزئیات را بگیر و جواب بده.) " + text
+            elif prod.get("name"):
+                text = f"(مشتری به این محصول اشاره دارد: {prod['name']}) " + text
 
     await context.bot.send_chat_action(chat_id=msg.chat_id, action=ChatAction.TYPING)
     # پیامِ موقت تا کاربر حس سرگردانی نکند (پاسخ کمی زمان می‌برد)
