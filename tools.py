@@ -119,6 +119,25 @@ SCHEMAS = [
     {
         "type": "function",
         "function": {
+            "name": "place_order",
+            "description": "ثبتِ اولیهٔ سفارش وقتی مشتری خرید را قطعی کرد و مشخصاتِ کاملش را داد (قبل از پرداختِ کارت‌به‌کارت). بعد از فراخوانیِ این، از مشتری عکسِ فیشِ واریز را بخواه.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "product": {"type": "string", "description": "نام یا مشخصاتِ ساعتِ سفارش‌شده"},
+                    "customer_name": {"type": "string", "description": "نام و نام‌خانوادگیِ مشتری"},
+                    "phone": {"type": "string", "description": "شمارهٔ تماس"},
+                    "address": {"type": "string", "description": "آدرسِ کاملِ پستی"},
+                    "postal_code": {"type": "string", "description": "کدپستی (اختیاری)"},
+                    "notes": {"type": "string", "description": "توضیحاتِ اضافه (اختیاری)"},
+                },
+                "required": ["product", "customer_name", "phone", "address"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
             "name": "save_customer_name",
             "description": "ثبت نام و نام‌خانوادگیِ مشتری وقتی آن را گفت (برای به‌روزرسانی پروفایل در دیتابیس).",
             "parameters": {
@@ -243,6 +262,17 @@ async def dispatch(name, args_json, ctx):
                 return _json({"available": False, "requested": True})
             # کالای شرکتی (موجودی شرکت واردکننده) → امکان عکس/ویدئوی روی مچ نیست
             return _json({"available": False, "company_stock": True})
+
+        if name == "place_order":
+            ctx["order"] = {
+                "product": (args.get("product") or "").strip(),
+                "customer_name": (args.get("customer_name") or "").strip(),
+                "phone": (args.get("phone") or "").strip(),
+                "address": (args.get("address") or "").strip(),
+                "postal_code": (args.get("postal_code") or "").strip(),
+                "notes": (args.get("notes") or "").strip(),
+            }
+            return _json({"ok": True, "message": "سفارش ثبتِ اولیه شد؛ حالا اطلاعاتِ پرداخت را بده و عکسِ فیش را از مشتری بخواه."})
 
         if name == "save_customer_name":
             ctx["name_update"] = {

@@ -57,6 +57,8 @@ ADMIN_USER_IDS = _id_list("ADMIN_USER_IDS")
 STAFF_GROUP_ID = _int("STAFF_GROUP_ID", 0)
 # گروهِ پشتیبانی برای ارجاعِ مشتری (اگر جدا تعریف نشود، همان گروهِ کاری استفاده می‌شود)
 SUPPORT_GROUP_ID = _int("SUPPORT_GROUP_ID", 0) or STAFF_GROUP_ID
+# گروهِ پیگیریِ مشتریان/CRM برای ثبتِ سفارشِ کارت‌به‌کارت + فیش + دکمهٔ تایید/رد
+ORDERS_GROUP_ID = _int("ORDERS_GROUP_ID", 0) or SUPPORT_GROUP_ID
 MEDIA_CHANNEL = _get("MEDIA_CHANNEL", "yourstore_products")
 
 # ---------- ووکامرس ----------

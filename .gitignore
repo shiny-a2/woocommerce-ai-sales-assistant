@@ -33,3 +33,6 @@ __pycache__/
 Thumbs.db
 .idea/
 .vscode/
+# store_info (sensitive) - keep only the example in git
+store_info.md
+!store_info.example.md

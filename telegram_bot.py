@@ -9,6 +9,7 @@ from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.constants import ChatAction
 from telegram.ext import (
     Application,
+    CallbackQueryHandler,
     CommandHandler,
     ContextTypes,
     MessageHandler,
@@ -117,7 +118,7 @@ def _schedule_followup(context, chat_id, user_id):
 
 _WELCOME = (
     "سلام، وقت‌تون به‌خیر 🌟\n"
-    "به فروشگاهِ نمونه خوش اومدید 😊\n"
+    "به گالری نمونه خوش اومدید 😊\n"
     "من مشاورِ هوشمندِ ساعتِ شما هستم؛ با کمالِ میل کمکتون می‌کنم تا از میانِ ساعت‌های اصل و "
     "باکیفیتِ گالری، بهترین انتخاب رو پیدا کنید ⌚\n"
     "کافیه بفرمایید دنبالِ چه ساعتی هستید — مثلاً مردانه یا زنانه، اسپرت یا کلاسیک، یا یه "
@@ -197,6 +198,7 @@ async def _save_name_to_crm(user, nu):
 
 
 _media_requests = {}  # message_id درخواست در گروه → {customer, reference, name}
+_logged_groups = set()  # گروه‌هایی که آیدی‌شان یک‌بار لاگ شده
 
 
 async def _post_staff_request(context, req):
@@ -241,15 +243,111 @@ async def _post_support_request(context, user, last_text, handoff):
         print(f"[tg] ارسال درخواست پشتیبانی به گروه ناموفق: {e}")
 
 
+# ---------- ثبتِ سفارشِ کارت‌به‌کارت + فیش + تاییدِ همکار ----------
+_pending_orders = {}            # user_id → {order, chat_id}  (منتظرِ عکسِ فیش)
+_orders_pending_approval = {}   # order_id → {customer, order, group_msg}  (منتظرِ تیک/ضربدر)
+_order_seq = 0
+
+
+def _order_summary(order, user):
+    uname = f"@{user.username}" if (user and user.username) else "—"
+    return (
+        f"⌚ محصول: {order.get('product','') or '—'}\n"
+        f"👤 نام: {order.get('customer_name','') or '—'}\n"
+        f"📞 تماس: {order.get('phone','') or '—'}\n"
+        f"📍 آدرس: {order.get('address','') or '—'}\n"
+        + (f"📮 کدپستی: {order['postal_code']}\n" if order.get("postal_code") else "")
+        + (f"📝 توضیح: {order['notes']}\n" if order.get("notes") else "")
+        + f"💬 تلگرام: {uname} | آیدی {user.id if user else '—'}"
+    )
+
+
+async def _handle_receipt(context, msg, user, pending):
+    """عکسِ فیشِ مشتری را با مشخصاتِ سفارش و دکمهٔ تایید/رد به گروهِ سفارش‌ها می‌فرستد."""
+    global _order_seq
+    order = pending.get("order", {})
+    gid = config.ORDERS_GROUP_ID
+    if not gid:
+        await msg.reply_text("فیشتون دریافت شد ✅ همکاران بررسی می‌کنن و به‌زودی خبرتون می‌کنیم 🙏")
+        return
+    _order_seq += 1
+    oid = str(_order_seq)
+    cap = ("🧾 فیشِ پرداخت + سفارشِ جدید (کارت‌به‌کارت)\n\n"
+           + _order_summary(order, user)
+           + "\n\nبعد از بررسیِ فیش، یکی از دکمه‌ها را بزنید 👇")
+    kb = InlineKeyboardMarkup([[
+        InlineKeyboardButton("✅ تایید سفارش", callback_data=f"ord:ok:{oid}"),
+        InlineKeyboardButton("❌ رد", callback_data=f"ord:no:{oid}"),
+    ]])
+    try:
+        sent = await context.bot.send_photo(gid, photo=msg.photo[-1].file_id, caption=cap, reply_markup=kb)
+        _orders_pending_approval[oid] = {"customer": msg.chat_id, "order": order, "group_msg": sent.message_id}
+        await msg.reply_text(
+            "فیشتون دریافت شد ✅ سفارشتون در حالِ بررسیِ نهاییه؛ به‌محضِ تایید، همین‌جا خبرتون می‌کنم 🙏"
+        )
+    except Exception as e:  # noqa: BLE001
+        print(f"[tg] ارسال فیش به گروهِ سفارش‌ها ناموفق: {e}")
+        await msg.reply_text("فیشتون دریافت شد ✅ همکاران بررسی می‌کنن و به‌زودی خبرتون می‌کنیم 🙏")
+
+
+async def _on_order_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """تیک/ضربدرِ همکار روی فیش → اعلامِ نتیجه به مشتری + به‌روزرسانیِ پیامِ گروه."""
+    q = update.callback_query
+    if not q:
+        return
+    await q.answer()
+    parts = (q.data or "").split(":")
+    if len(parts) != 3 or parts[0] != "ord":
+        return
+    action, oid = parts[1], parts[2]
+    info = _orders_pending_approval.pop(oid, None)
+    base_cap = (q.message.caption if q.message else "") or ""
+    if not info:
+        try:
+            await q.edit_message_caption(caption=base_cap + "\n\n⌛ این سفارش قبلاً رسیدگی شده.")
+        except Exception:  # noqa: BLE001
+            pass
+        return
+    cust = info["customer"]
+    by = update.effective_user.full_name if update.effective_user else ""
+    if action == "ok":
+        try:
+            await context.bot.send_message(
+                cust,
+                "سفارشتون تایید شد ✅🎉\nپرداختتون ثبت شد و سفارش وارد مرحلهٔ آماده‌سازی و ارسال می‌شه. "
+                "کدِ رهگیری و جزئیاتِ ارسال رو به‌زودی خدمتتون اعلام می‌کنیم. ممنون از خریدتون 🌹",
+            )
+        except Exception as e:  # noqa: BLE001
+            print(f"[tg] اعلامِ تایید به مشتری ناموفق: {e}")
+        tag = f"\n\n✅ تایید شد" + (f" — {by}" if by else "")
+    else:
+        try:
+            await context.bot.send_message(
+                cust,
+                "سلام 🙏 متأسفانه فیشِ پرداختتون تایید نشد. ممکنه مبلغ یا اطلاعاتِ واریز مشکلی داشته باشه؛ "
+                "لطفاً یک‌بار بررسی کنید یا با پشتیبانی (۰۹۱۲۰۱۶۳۵۶۳) هماهنگ کنید تا سریع حلش کنیم.",
+            )
+        except Exception as e:  # noqa: BLE001
+            print(f"[tg] اعلامِ رد به مشتری ناموفق: {e}")
+        tag = f"\n\n❌ رد شد" + (f" — {by}" if by else "")
+    try:
+        await q.edit_message_caption(caption=base_cap + tag)
+    except Exception:  # noqa: BLE001
+        pass
+
+
 async def _on_group(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """پیام‌های گروه: لاگِ آیدی (برای پیکربندی) + دریافتِ مدیای همکار و تحویل."""
     m = update.effective_message
     if not m or not m.chat or m.chat.type not in ("group", "supergroup"):
         return
-    if not config.STAFF_GROUP_ID:
+    # آیدیِ هر گروهِ ناشناخته را یک‌بار لاگ کن (برای پیکربندیِ STAFF/SUPPORT/ORDERS_GROUP_ID)
+    known = {config.STAFF_GROUP_ID, config.SUPPORT_GROUP_ID, config.ORDERS_GROUP_ID}
+    if m.chat_id not in known and m.chat_id not in _logged_groups:
+        _logged_groups.add(m.chat_id)
         print(f"[tg] گروه شناسایی شد → id={m.chat_id} | {m.chat.title}")
-        return
-    if m.chat_id != config.STAFF_GROUP_ID or not m.reply_to_message:
+    # رسیدگی به مدیای همکار فقط در گروهِ کاری (staff)
+    if not config.STAFF_GROUP_ID or m.chat_id != config.STAFF_GROUP_ID or not m.reply_to_message:
         return
     if not (m.photo or m.video or m.document):
         return
@@ -294,6 +392,9 @@ async def _deliver(context, msg, user, source_text, answer, ctx):
         sent = await _post_staff_request(context, req)
         if sent:
             _media_requests[sent.message_id] = {"customer": msg.chat_id, "reference": req.get("reference", ""), "name": req.get("name", "")}
+    # ثبتِ سفارش: منتظرِ عکسِ فیش از همین کاربر باش
+    if ctx.get("order") and user:
+        _pending_orders[user.id] = {"order": ctx["order"], "chat_id": msg.chat_id}
     # ذخیره‌ی نام: اگر مدل نامی گرفت، همان؛ وگرنه یک‌بار نامِ تلگرامیِ خودِ کاربر
     if ctx.get("name_update"):
         await _save_name_to_crm(user, ctx["name_update"])
@@ -363,6 +464,11 @@ async def _on_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
     user = update.effective_user
     _cancel_followup(user.id)
+    # اگر منتظرِ فیشِ پرداختِ این کاربریم، این عکس را به‌عنوانِ فیش پردازش کن (نه جستجوی ساعت)
+    pending = _pending_orders.pop(user.id, None)
+    if pending:
+        await _handle_receipt(context, msg, user, pending)
+        return
     await context.bot.send_chat_action(chat_id=msg.chat_id, action=ChatAction.TYPING)
     try:
         f = await msg.photo[-1].get_file()
@@ -423,4 +529,5 @@ def register_handlers(app: Application):
     app.add_handler(MessageHandler(filters.ChatType.PRIVATE & filters.PHOTO, _on_photo))
     app.add_handler(MessageHandler(filters.ChatType.PRIVATE & (filters.VOICE | filters.AUDIO), _on_voice))
     app.add_handler(MessageHandler(filters.ChatType.PRIVATE & filters.TEXT & ~filters.COMMAND, _on_message))
+    app.add_handler(CallbackQueryHandler(_on_order_callback, pattern=r"^ord:"))
     app.add_handler(MessageHandler(filters.ChatType.GROUPS, _on_group))
