@@ -7,7 +7,9 @@ from __future__ import annotations
 import asyncio
 import html
 import re
+import time
 
+from requests.exceptions import RequestException
 from woocommerce import API
 
 import config
@@ -23,16 +25,25 @@ def _client():
             consumer_key=config.WOO_CK,
             consumer_secret=config.WOO_CS,
             version="wc/v3",
-            timeout=30,
+            timeout=(4, 25),  # (اتصال، خواندن) — اتصالِ سریع‌شکست تا روی نوسانِ شبکه سریع‌تر retry بزند
             query_string_auth=True,
         )
     return _api
 
 
 def _get_sync(endpoint, params=None):
-    resp = _client().get(endpoint, params=params or {})
-    resp.raise_for_status()
-    return resp.json()
+    # هاستِ فروشگاه گاهی اتصال را تایم‌اوت می‌کند؛ چند بار تلاشِ مجدد با مکثِ کوتاه
+    last = None
+    for attempt in range(3):
+        try:
+            resp = _client().get(endpoint, params=params or {})
+            resp.raise_for_status()
+            return resp.json()
+        except RequestException as e:
+            last = e
+            if attempt < 2:
+                time.sleep(1.0 * (attempt + 1))
+    raise last
 
 
 async def get(endpoint, params=None):
@@ -386,7 +397,20 @@ def _digits(s):
 async def order_status(order_number, phone):
     """وضعیت یک سفارش را با تأیید شماره‌ی تماس برمی‌گرداند (برای جلوگیری از افشای سفارش دیگران)."""
     q = str(order_number).strip()
-    orders = await get("orders", {"search": q, "per_page": 10, "orderby": "date", "order": "desc"})
+    try:
+        orders = []
+        if q.isdigit():  # سریع‌ترین و مطمئن‌ترین راه: گرفتنِ مستقیمِ سفارش با آیدی
+            try:
+                o = await get(f"orders/{q}")
+                if isinstance(o, dict) and o.get("id"):
+                    orders = [o]
+            except Exception:  # noqa: BLE001 — اگر با آیدی نبود، با جستجو ادامه بده
+                orders = []
+        if not orders:
+            orders = await get("orders", {"search": q, "per_page": 10, "orderby": "date", "order": "desc"})
+    except Exception as e:  # noqa: BLE001 — سیستمِ سفارش‌ها در دسترس نبود
+        print(f"[woo] order_status در دسترس نبود: {type(e).__name__}")
+        return {"found": False, "reason": "unreachable"}
     want_phone = _digits(phone)[-10:]
     for o in orders:
         num = str(o.get("number") or o.get("id"))
