@@ -1,6 +1,7 @@
 """کانال تلگرام دستیار فروش: هندلرهای python-telegram-bot."""
 from __future__ import annotations
 
+import asyncio
 import base64
 
 import httpx
@@ -79,9 +80,44 @@ def _wants_wrist(text):
             return True
     return False
 
+
+# ---------- فالوآپِ خودکار: اگر بعد از نمایشِ محصول ۵ دقیقه سکوت شد، یک‌بار پیگیری کن ----------
+_FOLLOWUP_DELAY = 300  # ثانیه (۵ دقیقه)
+_followup_tasks = {}   # user_id → asyncio.Task
+_FOLLOWUP_TEXT = (
+    "ببخشید مزاحم شدم 🙂 از بینِ گزینه‌هایی که خدمتتون فرستادم چیزی به دلتون نشست؟\n"
+    "اگر هنوز مرددید، سؤالی هست، یا چیزِ دیگه‌ای مدِ نظرتونه، بفرمایید تا بهتر راهنماییتون کنم 🌟"
+)
+
+
+def _cancel_followup(user_id):
+    t = _followup_tasks.pop(user_id, None)
+    if t and not t.done():
+        t.cancel()
+
+
+async def _followup_after(context, chat_id, user_id):
+    try:
+        await asyncio.sleep(_FOLLOWUP_DELAY)
+    except asyncio.CancelledError:
+        return
+    _followup_tasks.pop(user_id, None)
+    try:
+        await context.bot.send_message(chat_id, _FOLLOWUP_TEXT)
+    except Exception as e:  # noqa: BLE001
+        print(f"[tg] فالوآپ ناموفق: {e}")
+
+
+def _schedule_followup(context, chat_id, user_id):
+    _cancel_followup(user_id)
+    try:
+        _followup_tasks[user_id] = asyncio.create_task(_followup_after(context, chat_id, user_id))
+    except RuntimeError:  # حلقهٔ asyncio در دسترس نبود
+        pass
+
 _WELCOME = (
     "سلام، وقت‌تون به‌خیر 🌟\n"
-    "به گالری نمونه خوش اومدید 😊\n"
+    "به فروشگاهِ نمونه خوش اومدید 😊\n"
     "من مشاورِ هوشمندِ ساعتِ شما هستم؛ با کمالِ میل کمکتون می‌کنم تا از میانِ ساعت‌های اصل و "
     "باکیفیتِ گالری، بهترین انتخاب رو پیدا کنید ⌚\n"
     "کافیه بفرمایید دنبالِ چه ساعتی هستید — مثلاً مردانه یا زنانه، اسپرت یا کلاسیک، یا یه "
@@ -183,6 +219,28 @@ async def _post_staff_request(context, req):
         return None
 
 
+async def _post_support_request(context, user, last_text, handoff):
+    """خلاصهٔ مرتبِ مشتری را برای پیگیری به گروهِ پشتیبانی می‌فرستد."""
+    gid = config.SUPPORT_GROUP_ID
+    if not gid:
+        return
+    uname = f"@{user.username}" if (user and user.username) else "—"
+    txt = (
+        "🆘 درخواستِ پشتیبانیِ مشتری\n"
+        "همکارانِ پشتیبانی، لطفاً این مشتری را پیگیری کنید 🙏\n\n"
+        f"👤 نام: {(_full_name(user) if user else '') or '—'}\n"
+        f"💬 تلگرام: {uname}\n"
+        f"🆔 آیدی: {user.id if user else '—'}\n"
+        f"📞 شمارهٔ تماس: {handoff.get('contact') or '— (نگرفته)'}\n"
+        f"📌 موضوع: {handoff.get('reason', '') or '—'}\n"
+        f"📝 آخرین پیام: {last_text}"
+    )
+    try:
+        await context.bot.send_message(gid, txt)
+    except Exception as e:  # noqa: BLE001
+        print(f"[tg] ارسال درخواست پشتیبانی به گروه ناموفق: {e}")
+
+
 async def _on_group(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """پیام‌های گروه: لاگِ آیدی (برای پیکربندی) + دریافتِ مدیای همکار و تحویل."""
     m = update.effective_message
@@ -220,6 +278,8 @@ async def _deliver(context, msg, user, source_text, answer, ctx):
         await msg.reply_text(answer, disable_web_page_preview=bool(cards))
     if cards:
         await _send_cards(context, msg, cards)
+        if user:  # اگر محصول نشان دادیم، ۵ دقیقه بعد یک‌بار پیگیری کن (اگر سکوت شد)
+            _schedule_followup(context, msg.chat_id, user.id)
     # عکس/ویدئوی روی مچ‌دست: کپی از چنل
     wm = ctx.get("wrist_media")
     if wm and wm.get("ids"):
@@ -241,7 +301,8 @@ async def _deliver(context, msg, user, source_text, answer, ctx):
         _name_pushed.add(user.id)
         await _save_name_to_crm(user, {"first_name": user.first_name or "", "last_name": user.last_name or ""})
     if ctx.get("handoff"):
-        await _notify_admins(context, user, source_text, ctx["handoff"])
+        await _post_support_request(context, user, source_text, ctx["handoff"])  # لیستِ مرتب در گروه
+        await _notify_admins(context, user, source_text, ctx["handoff"])         # هشدار به ادمین‌ها
 
 
 async def _handle_wrist(context, msg, user, product_id):
@@ -270,6 +331,7 @@ async def _on_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not msg or not msg.text:
         return
     user = update.effective_user
+    _cancel_followup(user.id)  # کاربر فعال است → فالوآپِ معلق را لغو کن
     text = msg.text
     # اگر به کارتِ محصول ریپلای کرده:
     if msg.reply_to_message:
@@ -300,6 +362,7 @@ async def _on_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not msg or not msg.photo:
         return
     user = update.effective_user
+    _cancel_followup(user.id)
     await context.bot.send_chat_action(chat_id=msg.chat_id, action=ChatAction.TYPING)
     try:
         f = await msg.photo[-1].get_file()
@@ -319,6 +382,7 @@ async def _on_voice(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not voice:
         return
     user = update.effective_user
+    _cancel_followup(user.id)
     await context.bot.send_chat_action(chat_id=msg.chat_id, action=ChatAction.TYPING)
     try:
         f = await voice.get_file()

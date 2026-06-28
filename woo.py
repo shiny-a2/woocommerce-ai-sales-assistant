@@ -379,11 +379,11 @@ async def search_watches(gender=None, movement=None, dial_color=None, strap_colo
         if sm:
             rows = sm
 
-    # اولویت‌بندیِ نامحسوس: اول گارانتیِ جواهرتایم، بعد ارسال فوری (موجودی فروشگاه)
+    # اولویت‌بندیِ نمایش: اول «ارسال فوری» (موجودیِ فروشگاه)، بعد گارانتیِ نامحسوسِ جواهرتایم
     def _jewel(p):
         return any(("جواهرتایم" in g) or ("جواهر تایم" in g) for g in attr_options(p, "گارانتی کننده در ایران"))
 
-    rows.sort(key=lambda r: (0 if _jewel(r[1]) else 1, 0 if r[0].get("shipping_time") == "ارسال فوری" else 1))
+    rows.sort(key=lambda r: (0 if r[0].get("shipping_time") == "ارسال فوری" else 1, 0 if _jewel(r[1]) else 1))
 
     return [b for (b, _) in rows][: max(3, int(limit or 7))]
 
@@ -392,6 +392,21 @@ async def search_watches(gender=None, movement=None, dial_color=None, strap_colo
 
 def _digits(s):
     return re.sub(r"\D", "", s or "")
+
+
+async def _order_has_company_stock(product_ids):
+    """آیا سفارش شاملِ کالای موجودیِ شرکت (نه ارسالِ فوری) است؟ برای پیامِ صبوریِ ۳ تا ۱۴ روز."""
+    ids = [str(p) for p in (product_ids or []) if p]
+    if not ids:
+        return False
+    try:
+        prods = await get("products", {"include": ",".join(ids[:10]), "per_page": 10})
+    except Exception:  # noqa: BLE001 — اگر نشد، صبورانه فرض نکن
+        return False
+    for p in prods or []:
+        if availability(p).get("shipping") != "ارسال فوری":
+            return True
+    return False
 
 
 async def order_status(order_number, phone):
@@ -419,7 +434,9 @@ async def order_status(order_number, phone):
         b = o.get("billing", {}) or {}
         have_phone = _digits(b.get("phone"))[-10:]
         if want_phone and have_phone and want_phone == have_phone:
-            items = [li.get("name") for li in (o.get("line_items") or []) if li.get("name")]
+            line_items = o.get("line_items") or []
+            items = [li.get("name") for li in line_items if li.get("name")]
+            pids = [li.get("product_id") for li in line_items if li.get("product_id")]
             return {
                 "found": True,
                 "number": num,
@@ -428,6 +445,7 @@ async def order_status(order_number, phone):
                 "total": price_label(o.get("total")),
                 "items": items,
                 "shipping_method": (o.get("shipping_lines") or [{}])[0].get("method_title", ""),
+                "company_stock": await _order_has_company_stock(pids),
             }
         return {"found": False, "reason": "phone_mismatch"}
     return {"found": False, "reason": "not_found"}

@@ -55,7 +55,9 @@ TELEGRAM_BOT_TOKEN = _get("TELEGRAM_BOT_TOKEN", "")
 ADMIN_USER_IDS = _id_list("ADMIN_USER_IDS")
 # گروهِ کاری برای درخواستِ زندهٔ عکس/ویدئوی مچ‌دست از همکاران، و چنلِ آرشیو
 STAFF_GROUP_ID = _int("STAFF_GROUP_ID", 0)
-MEDIA_CHANNEL = _get("MEDIA_CHANNEL", "your_products_channel")
+# گروهِ پشتیبانی برای ارجاعِ مشتری (اگر جدا تعریف نشود، همان گروهِ کاری استفاده می‌شود)
+SUPPORT_GROUP_ID = _int("SUPPORT_GROUP_ID", 0) or STAFF_GROUP_ID
+MEDIA_CHANNEL = _get("MEDIA_CHANNEL", "yourstore_products")
 
 # ---------- ووکامرس ----------
 WOO_URL = (_get("WOO_URL", "") or "").rstrip("/")
