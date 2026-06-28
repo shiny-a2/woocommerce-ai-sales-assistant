@@ -23,8 +23,8 @@ app = FastAPI(title="Store Sales Assistant")
 app.add_middleware(
     CORSMiddleware,
     allow_origins=config.WEB_ALLOWED_ORIGINS,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_methods=["GET", "POST", "OPTIONS"],
+    allow_headers=["Content-Type", "X-SB-Token"],
 )
 
 
