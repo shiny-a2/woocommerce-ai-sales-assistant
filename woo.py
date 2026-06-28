@@ -249,6 +249,20 @@ async def get_briefs(ids):
     return [by_id[i] for i in ids if i in by_id]  # ترتیب ورودی حفظ شود
 
 
+async def search_by_reference(reference, limit=6):
+    """محصول(ها) را با کد/رفرنس پیدا می‌کند (جستجوی متنیِ ووکامرس عنوان/SKU/رفرنس را پوشش می‌دهد)."""
+    ref = (reference or "").strip()
+    if not ref:
+        return []
+    items = await get("products", {"search": ref, "per_page": max(1, min(int(limit or 6), 12)), "status": "publish"})
+    out = []
+    for p in items:
+        b = _product_brief(p)
+        if b.get("price_toman"):
+            out.append(b)
+    return out
+
+
 async def list_categories(limit=40):
     cats = await get("products/categories", {"per_page": limit, "orderby": "count", "order": "desc", "hide_empty": True})
     return [{"id": c.get("id"), "name": c.get("name"), "count": c.get("count")} for c in cats]

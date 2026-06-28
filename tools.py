@@ -107,6 +107,18 @@ SCHEMAS = [
     {
         "type": "function",
         "function": {
+            "name": "find_by_reference",
+            "description": "وقتی مشتری یک کد یا رفرنسِ محصول گفت (مثل «BF2018-52E» یا «DK.1.14002-5»)، محصولِ متناظر را پیدا می‌کند. هرگز نگو «اطلاعی ندارم»؛ این را صدا بزن.",
+            "parameters": {
+                "type": "object",
+                "properties": {"reference": {"type": "string", "description": "کد/رفرنسِ محصول"}},
+                "required": ["reference"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
             "name": "get_brand_info",
             "description": "تاریخچه/معرفیِ یک برندِ ساعت را از مقالاتِ سایتِ گالری می‌گیرد (برای پاسخ به سؤالاتِ اصالت/دربارهٔ برند). اگر مقاله‌ای پیدا نشد (found=false)، خودت یک خلاصهٔ کوتاه و واقعی از همان برند بده.",
             "parameters": {
@@ -255,6 +267,14 @@ async def dispatch(name, args_json, ctx):
             if res.get("found"):
                 res["status_fa"] = persona.STATUS_FA.get(res.get("status"), res.get("status"))
             return _json(res)
+
+        if name == "find_by_reference":
+            items = await woo.search_by_reference(args.get("reference", ""))
+            return _json({
+                "count": len(items),
+                "products": items,
+                "note": "اگر یک محصول بود مشخصاتش را بگو؛ اگر چند تا بود آیدی‌ها را به show_products بده تا کارت شوند.",
+            })
 
         if name == "get_brand_info":
             art = await woo.get_brand_article(args.get("brand", ""))
