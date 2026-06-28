@@ -9,7 +9,7 @@ import persona
 import sessions
 import textfmt
 
-_FALLBACK = "ببخشید، الان یک اشکال فنی پیش اومد. لطفاً چند لحظه دیگه دوباره بپرسید 🙏"
+_FALLBACK = "ببخشید، یک اشکالِ فنیِ کوچک پیش اومد 🙏 لطفاً چند لحظهٔ دیگه دوباره بفرمایید؛ در خدمتم."
 
 
 def _name_hint(user_name):
@@ -27,7 +27,7 @@ async def reply(channel, user_id, text, user_name=None):
     text = (text or "").strip()
     ctx: dict = {}
     if not text:
-        return ("سلام 🌟 چطور می‌تونم کمکتون کنم؟", ctx)
+        return ("سلام 🌟 در خدمتم؛ چطور می‌تونم کمکتون کنم؟", ctx)
 
     messages = [{"role": "system", "content": persona.system_prompt()}]
     hint = _name_hint(user_name)
@@ -47,7 +47,7 @@ async def reply(channel, user_id, text, user_name=None):
         answer = _FALLBACK
     answer = textfmt.clean_for_chat(answer)
     if ctx.get("cards"):  # کارت‌ها جدا (عکس) نمایش داده می‌شوند؛ از متن حذفشان کن
-        answer = textfmt.strip_product_lines(answer) or "چند گزینهٔ خوب برات پیدا کردم 🌟"
+        answer = textfmt.strip_product_lines(answer) or "چند گزینهٔ خوب و مناسب براتون پیدا کردم 🌟 در ادامه ببینید:"
 
     # فقط در صورت موفقیت، تاریخچه را ذخیره کن
     sessions.append(channel, user_id, "user", text)
@@ -80,7 +80,7 @@ async def reply_image(channel, user_id, image_data_url, caption="", user_name=No
 
     answer = textfmt.clean_for_chat(answer) or _FALLBACK
     if ctx.get("cards"):
-        answer = textfmt.strip_product_lines(answer) or "چند گزینهٔ نزدیک به تصویرت پیدا کردم 🌟"
+        answer = textfmt.strip_product_lines(answer) or "چند ساعتِ نزدیک به تصویری که فرستادید پیدا کردم 🌟 ببینید:"
 
     sessions.append(channel, user_id, "user", "[تصویر ساعت] " + (caption or ""))
     sessions.append(channel, user_id, "assistant", answer)
@@ -117,12 +117,12 @@ async def answer_messages(messages, system_extra=""):
     text = textfmt.clean_for_chat(text)
     cards = ctx.get("cards") or []
     if cards:  # وب/CRM عکس‌کارت ندارد؛ متن را پاک و کارت‌ها را به‌صورت متن ضمیمه کن
-        intro = textfmt.strip_product_lines(text) or "چند گزینهٔ خوب برات پیدا کردم 🌟"
+        intro = textfmt.strip_product_lines(text) or "چند گزینهٔ خوب و مناسب براتون پیدا کردم 🌟 در ادامه ببینید:"
         text = (intro + "\n\n" + _cards_as_text(cards)).strip()
     wm = ctx.get("wrist_media")
     if wm and wm.get("ids"):  # چت سایت: لینکِ پستِ چنل (عمومی)
         links = "\n".join(f"https://t.me/{wm['channel']}/{i}" for i in wm["ids"][:4])
-        text = (text + "\n\n🎥 عکس/ویدئوی روی مچ‌دستِ همین ساعت:\n" + links).strip()
+        text = (text + "\n\n🎥 عکس و ویدئوی روی مچ‌دستِ همین ساعت:\n" + links).strip()
     return (text, ctx)
 
 

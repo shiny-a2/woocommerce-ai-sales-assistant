@@ -67,8 +67,8 @@ def _looks_like_product(text):
 
 def _interim_text(text):
     if _looks_like_product(text):
-        return "چشم 🔎 بذار بهترین گزینه‌ها رو برات پیدا کنم…"
-    return "چشم 🙏 الان برات بررسی می‌کنم…"
+        return "چشم 🔎 اجازه بدید بهترین گزینه‌ها رو از گالری براتون پیدا کنم…"
+    return "چشم 🙏 یک لحظه، همین الان بررسی می‌کنم…"
 
 
 def _wants_wrist(text):
@@ -80,10 +80,12 @@ def _wants_wrist(text):
     return False
 
 _WELCOME = (
-    "سلام و وقت‌بخیر 🌟\n"
-    "خیلی خوش اومدی به فروشگاهِ نمونه 😊\n"
-    "من دستیارِ هوشمندِ ساعتِ تو هستم و با کمال میل کمکت می‌کنم بهترین ساعت رو پیدا کنی ⌚\n"
-    "هر وقت آماده بودی، راحت بگو دنبال چه ساعتی هستی؛ مثلاً مردانه یا زنانه، اسپرت یا کلاسیک، یا یه بودجهٔ تقریبی 🙂"
+    "سلام، وقت‌تون به‌خیر 🌟\n"
+    "به فروشگاهِ نمونه خوش اومدید 😊\n"
+    "من مشاورِ هوشمندِ ساعتِ شما هستم؛ با کمالِ میل کمکتون می‌کنم تا از میانِ ساعت‌های اصل و "
+    "باکیفیتِ گالری، بهترین انتخاب رو پیدا کنید ⌚\n"
+    "کافیه بفرمایید دنبالِ چه ساعتی هستید — مثلاً مردانه یا زنانه، اسپرت یا کلاسیک، یا یه "
+    "بودجهٔ تقریبی — تا گزینه‌های مناسب رو خدمتتون بیارم 🙂"
 )
 
 
@@ -95,7 +97,7 @@ async def _start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def _reset(update: Update, context: ContextTypes.DEFAULT_TYPE):
     sessions.reset(CHANNEL, update.effective_user.id)
-    await update.message.reply_text("گفتگو از نو شروع شد ✅ چطور کمکتون کنم؟")
+    await update.message.reply_text("گفتگومون از نو شروع شد ✅ در خدمتم؛ دنبالِ چه ساعتی هستید؟")
 
 
 def _card_caption(c):
@@ -163,8 +165,10 @@ _media_requests = {}  # message_id درخواست در گروه → {customer, r
 async def _post_staff_request(context, req):
     """درخواستِ عکس/ویدئوی مچ‌دست را در گروهِ کاری می‌گذارد."""
     cap = (
-        "همکاران عزیز 🙏\n"
-        "لطفاً عکس و ویدئوی روی مچ‌دستِ این ساعت رو بگیرید و حتماً همین پیام رو ریپلای کنید و تصاویر/ویدئوها رو بفرستید.\n\n"
+        "🔔 درخواستِ عکس/ویدئوی روی مچ‌دست\n"
+        "همکارانِ عزیز، یک مشتری برای این ساعت عکس و ویدئوی روی مچ‌دست خواسته 🙏\n"
+        "لطفاً عکس/ویدئوها رو بگیرید و حتماً «همین پیام» رو ریپلای کنید و بفرستید، تا هم مستقیم "
+        "به دستِ مشتری برسه و هم در کانال بایگانی بشه.\n\n"
         f"⌚ {req.get('name','')}\n"
         + (f"🔖 رفرانس: {req['reference']}\n" if req.get("reference") else "")
         + (f"🔗 {req['url']}" if req.get("url") else "")
@@ -247,15 +251,16 @@ async def _handle_wrist(context, msg, user, product_id):
     except Exception:  # noqa: BLE001
         res = {}
     if ctx.get("wrist_media"):
-        answer = "چشم 🙌 اینم عکس و ویدئوی روی مچ‌دستِ همین ساعت، ببین چطور می‌شینه:"
+        answer = "با کمالِ میل 🙌 اینم عکس و ویدئوی واقعیِ روی مچ‌دستِ همین ساعت؛ ببینید چطور می‌شینه:"
     elif ctx.get("wrist_media_request"):
-        answer = ("چشم 🙌 الان از همکارام می‌خوام عکس و ویدئوی روی مچ‌دستِ همین ساعت رو بگیرن؛ "
-                  "به‌محضِ آماده‌شدن همین‌جا برات می‌فرستم 🙏")
+        answer = ("چشم 🙌 همین الان از همکارانم می‌خوام عکس و ویدئوی روی مچ‌دستِ این ساعت رو آماده کنن؛ "
+                  "به‌محضِ آماده‌شدن، همین‌جا خدمتتون می‌فرستم 🙏")
     elif res.get("company_stock"):
-        answer = ("این مدل از موجودیِ شرکتِ واردکننده‌ست و فعلاً امکانِ عکس/ویدئوی روی مچ‌دست براش نداریم 🙏 "
-                  "ولی همهٔ مشخصاتش رو با کمال میل برات می‌گم.")
+        answer = ("این مدل از موجودیِ شرکتِ واردکننده‌ست و فعلاً عکس/ویدئوی روی مچ‌دست براش نداریم 🙏 "
+                  "ولی با کمالِ میل همهٔ مشخصات و جزئیاتش رو خدمتتون می‌گم تا با خیالِ راحت تصمیم بگیرید.")
     else:
-        answer = "فعلاً عکس/ویدئوی روی مچِ این مدل رو ندارم 🙏 ولی مشخصاتِ کامل و لینکش رو برات می‌فرستم."
+        answer = ("فعلاً عکس/ویدئوی روی مچِ این مدل رو در دسترس ندارم 🙏 "
+                  "ولی مشخصاتِ کامل و لینکِ صفحهٔ محصول رو خدمتتون می‌فرستم.")
     await _deliver(context, msg, user, msg.text, answer, ctx)
 
 
@@ -301,7 +306,7 @@ async def _on_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
         url = "data:image/jpeg;base64," + base64.b64encode(data).decode()
     except Exception as e:  # noqa: BLE001
         print(f"[tg] دریافت عکس ناموفق: {e}")
-        await msg.reply_text("نتونستم عکس رو بگیرم، لطفاً دوباره بفرست 🙏")
+        await msg.reply_text("متأسفانه نتونستم عکس رو دریافت کنم 🙏 لطفاً یک‌بارِ دیگه ارسالش کنید.")
         return
     answer, ctx = await assistant.reply_image(CHANNEL, user.id, url, msg.caption or "", user_name=_full_name(user))
     await _deliver(context, msg, user, "[تصویر]", answer, ctx)
@@ -320,10 +325,10 @@ async def _on_voice(update: Update, context: ContextTypes.DEFAULT_TYPE):
         text = await llm.transcribe(data, "voice.ogg")
     except Exception as e:  # noqa: BLE001
         print(f"[tg] رونویسی ویس ناموفق: {e}")
-        await msg.reply_text("نتونستم صدا رو بفهمم، یه بار دیگه بگو یا تایپ کن 🙏")
+        await msg.reply_text("متأسفانه نتونستم صدا رو دریافت کنم 🙏 لطفاً دوباره بفرمایید یا اگر راحت‌ترید تایپ کنید.")
         return
     if not text:
-        await msg.reply_text("صدا رو واضح نگرفتم، لطفاً دوباره 🙏")
+        await msg.reply_text("صدا رو واضح نگرفتم 🙏 لطفاً یک‌بارِ دیگه بفرمایید.")
         return
     answer, ctx = await assistant.reply(CHANNEL, user.id, text, user_name=_full_name(user))
     await _deliver(context, msg, user, text, answer, ctx)

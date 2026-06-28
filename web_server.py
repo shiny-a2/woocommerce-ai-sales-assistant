@@ -19,7 +19,7 @@ import config
 CHANNEL = "web"
 _tg_app = None  # برای ارجاع به ادمین از طریق تلگرام (هنگام serve ست می‌شود)
 
-app = FastAPI(title="Javaherian Sales Assistant")
+app = FastAPI(title="Store Sales Assistant")
 app.add_middleware(
     CORSMiddleware,
     allow_origins=config.WEB_ALLOWED_ORIGINS,
@@ -166,9 +166,9 @@ _EMBED_JS = r"""
 
   var btn = document.createElement('button'); btn.id = 'jg-btn'; btn.innerHTML = '💬';
   var box = document.createElement('div'); box.id = 'jg-box';
-  box.innerHTML = '<div id="jg-hd">مشاور فروشگاهِ نمونه</div>'
+  box.innerHTML = '<div id="jg-hd">مشاورِ ساعتِ فروشگاهِ نمونه</div>'
     + '<div id="jg-msgs"></div>'
-    + '<div id="jg-in"><input id="jg-tx" placeholder="پیام شما..." autocomplete="off"><button id="jg-snd">ارسال</button></div>';
+    + '<div id="jg-in"><input id="jg-tx" placeholder="پیامتون رو بنویسید…" autocomplete="off"><button id="jg-snd">ارسال</button></div>';
   document.body.appendChild(btn); document.body.appendChild(box);
 
   var msgs = box.querySelector('#jg-msgs');
@@ -186,7 +186,7 @@ _EMBED_JS = r"""
   function toggle(){
     var open = box.style.display==='flex';
     box.style.display = open?'none':'flex';
-    if(!open && !greeted){greeted=true; add('سلام 🌟 چی دنبالشید؟ کمکتون می‌کنم.', 'a'); tx.focus();}
+    if(!open && !greeted){greeted=true; add('سلام 🌟 به فروشگاهِ نمونه خوش اومدید. دنبالِ چه ساعتی هستید؟ با کمالِ میل کمکتون می‌کنم.', 'a'); tx.focus();}
   }
   btn.onclick = toggle;
 
@@ -199,7 +199,7 @@ _EMBED_JS = r"""
       body: JSON.stringify({session_id: sid, message: t})
     }).then(function(r){return r.json();})
       .then(function(j){ typing.innerHTML = linkify(j.reply || '...'); msgs.scrollTop=msgs.scrollHeight; })
-      .catch(function(){ typing.textContent = 'خطا در ارتباط. دوباره تلاش کنید.'; });
+      .catch(function(){ typing.textContent = 'ارتباط برقرار نشد 🙏 لطفاً دوباره تلاش کنید.'; });
   }
   box.querySelector('#jg-snd').onclick = send;
   tx.addEventListener('keydown', function(e){ if(e.key==='Enter'){ e.preventDefault(); send(); }});
@@ -213,8 +213,8 @@ _DEMO_HTML = """<!doctype html>
 <style>body{font-family:Tahoma,sans-serif;background:#1a1a1a;color:#eee;text-align:center;padding-top:80px}
 h1{color:#caa15a}</style></head>
 <body>
-<h1>دستیار فروش فروشگاهِ نمونه</h1>
-<p>روی دکمه‌ی گفتگو پایین صفحه بزن و تست کن.</p>
+<h1>مشاورِ ساعتِ فروشگاهِ نمونه</h1>
+<p>روی دکمهٔ گفتگو در پایینِ صفحه بزنید و گفتگو رو امتحان کنید.</p>
 <script src="/embed.js" defer></script>
 </body></html>
 """
