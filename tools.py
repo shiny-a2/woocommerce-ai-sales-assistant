@@ -107,6 +107,18 @@ SCHEMAS = [
     {
         "type": "function",
         "function": {
+            "name": "get_brand_info",
+            "description": "تاریخچه/معرفیِ یک برندِ ساعت را از مقالاتِ سایتِ گالری می‌گیرد (برای پاسخ به سؤالاتِ اصالت/دربارهٔ برند). اگر مقاله‌ای پیدا نشد (found=false)، خودت یک خلاصهٔ کوتاه و واقعی از همان برند بده.",
+            "parameters": {
+                "type": "object",
+                "properties": {"brand": {"type": "string", "description": "نامِ برند، مثل «سیتیزن» یا «Citizen»"}},
+                "required": ["brand"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
             "name": "get_wrist_media",
             "description": "عکس/ویدئوی روی‌مچ‌دستِ یک ساعت را برای ارسال به مشتری آماده می‌کند (وقتی مشتری به آن ساعت علاقه نشان داد، برای کمک به انتخاب). آیدیِ همان محصول را بده.",
             "parameters": {
@@ -244,6 +256,12 @@ async def dispatch(name, args_json, ctx):
                 res["status_fa"] = persona.STATUS_FA.get(res.get("status"), res.get("status"))
             return _json(res)
 
+        if name == "get_brand_info":
+            art = await woo.get_brand_article(args.get("brand", ""))
+            if art:
+                return _json({"found": True, **art})
+            return _json({"found": False})
+
         if name == "get_wrist_media":
             briefs = await woo.get_briefs([args["product_id"]])
             if not briefs:
@@ -261,6 +279,7 @@ async def dispatch(name, args_json, ctx):
                 }
                 return _json({"available": False, "requested": True})
             # کالای شرکتی (موجودی شرکت واردکننده) → امکان عکس/ویدئوی روی مچ نیست
+            ctx["wrist_media_company_stock"] = {"name": b.get("name", "")}
             return _json({"available": False, "company_stock": True})
 
         if name == "place_order":

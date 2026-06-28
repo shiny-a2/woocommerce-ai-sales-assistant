@@ -76,7 +76,7 @@ def _interim_text(text):
 def _wants_wrist(text):
     t = text or ""
     for kw in ("مچ", "روی مج", "رو مج", "مج دست", "مج‌دست", "روی دست", "رو دست",
-               "روی دستم", "رو دستم", "روی دستش"):
+               "روی دستم", "رو دستم", "روی دستش", "عکس", "تصویر", "ویدیو", "ویدئو", "فیلم"):
         if kw in t:
             return True
     return False
@@ -118,7 +118,7 @@ def _schedule_followup(context, chat_id, user_id):
 
 _WELCOME = (
     "سلام، وقت‌تون به‌خیر 🌟\n"
-    "به گالری نمونه خوش اومدید 😊\n"
+    "به فروشگاهِ نمونه خوش اومدید 😊\n"
     "من مشاورِ هوشمندِ ساعتِ شما هستم؛ با کمالِ میل کمکتون می‌کنم تا از میانِ ساعت‌های اصل و "
     "باکیفیتِ گالری، بهترین انتخاب رو پیدا کنید ⌚\n"
     "کافیه بفرمایید دنبالِ چه ساعتی هستید — مثلاً مردانه یا زنانه، اسپرت یا کلاسیک، یا یه "
@@ -368,10 +368,26 @@ async def _on_group(update: Update, context: ContextTypes.DEFAULT_TYPE):
         print(f"[tg] درج در چنل ناموفق: {e}")
 
 
+def _wrist_answer(ctx):
+    """پیامِ قطعیِ عکس/ویدئوی مچ‌دست بر اساسِ نتیجهٔ واقعیِ ابزار (نه متنِ مدل). None اگر مچ‌دستی در کار نبود."""
+    if ctx.get("wrist_media"):
+        return "با کمالِ میل 🙌 اینم عکس و ویدئوی واقعیِ روی مچ‌دستِ همین ساعت؛ ببینید چطور می‌شینه:"
+    if ctx.get("wrist_media_request"):
+        return ("چشم 🙌 همین الان از همکارانم می‌خوام عکس و ویدئوی روی مچ‌دستِ این ساعت رو آماده کنن؛ "
+                "به‌محضِ آماده‌شدن، همین‌جا خدمتتون می‌فرستم 🙏")
+    if ctx.get("wrist_media_company_stock"):
+        return ("این مدل از موجودیِ شرکتِ واردکننده‌ست و فعلاً عکس/ویدئوی روی مچ‌دست براش نداریم 🙏 "
+                "ولی با کمالِ میل همهٔ مشخصات و جزئیاتش رو خدمتتون می‌گم تا با خیالِ راحت تصمیم بگیرید.")
+    return None
+
+
 async def _deliver(context, msg, user, source_text, answer, ctx):
     if user:
         botusers.add_user(user.id)
     cards = ctx.get("cards") or []
+    wa = _wrist_answer(ctx)  # متنِ قطعیِ مچ‌دست؛ متنِ احتمالاً‌غلطِ مدل را override می‌کند
+    if wa:
+        answer = wa
     if answer:
         await msg.reply_text(answer, disable_web_page_preview=bool(cards))
     if cards:
@@ -410,20 +426,11 @@ async def _handle_wrist(context, msg, user, product_id):
     """تحویلِ قطعیِ عکس/ویدئوی مچ‌دست برای محصولِ مشخص — مستقل از مدل (تا وعدهٔ توخالی ندهد)."""
     ctx = {}
     try:
-        res = json.loads(await tools.dispatch("get_wrist_media", json.dumps({"product_id": product_id}), ctx))
+        await tools.dispatch("get_wrist_media", json.dumps({"product_id": product_id}), ctx)
     except Exception:  # noqa: BLE001
-        res = {}
-    if ctx.get("wrist_media"):
-        answer = "با کمالِ میل 🙌 اینم عکس و ویدئوی واقعیِ روی مچ‌دستِ همین ساعت؛ ببینید چطور می‌شینه:"
-    elif ctx.get("wrist_media_request"):
-        answer = ("چشم 🙌 همین الان از همکارانم می‌خوام عکس و ویدئوی روی مچ‌دستِ این ساعت رو آماده کنن؛ "
-                  "به‌محضِ آماده‌شدن، همین‌جا خدمتتون می‌فرستم 🙏")
-    elif res.get("company_stock"):
-        answer = ("این مدل از موجودیِ شرکتِ واردکننده‌ست و فعلاً عکس/ویدئوی روی مچ‌دست براش نداریم 🙏 "
-                  "ولی با کمالِ میل همهٔ مشخصات و جزئیاتش رو خدمتتون می‌گم تا با خیالِ راحت تصمیم بگیرید.")
-    else:
-        answer = ("فعلاً عکس/ویدئوی روی مچِ این مدل رو در دسترس ندارم 🙏 "
-                  "ولی مشخصاتِ کامل و لینکِ صفحهٔ محصول رو خدمتتون می‌فرستم.")
+        pass
+    answer = _wrist_answer(ctx) or ("فعلاً عکس/ویدئوی روی مچِ این مدل رو در دسترس ندارم 🙏 "
+                                    "ولی مشخصاتِ کامل و لینکِ صفحهٔ محصول رو خدمتتون می‌فرستم.")
     await _deliver(context, msg, user, msg.text, answer, ctx)
 
 

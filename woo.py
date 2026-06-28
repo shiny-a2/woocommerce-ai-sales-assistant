@@ -9,6 +9,7 @@ import html
 import re
 import time
 
+import requests
 from requests.exceptions import RequestException
 from woocommerce import API
 
@@ -133,6 +134,8 @@ def _product_brief(p):
         "image": images[0].get("src") if images else None,
         "short": strip_html(p.get("short_description"), 160),
         "reference": (attr_options(p, "رفرانس") or [""])[0],
+        "warranty": (attr_options(p, "گارانتی") or [""])[0],
+        "warranty_provider": (attr_options(p, "گارانتی کننده در ایران") or [""])[0],
     }
 
 
@@ -189,6 +192,51 @@ async def search_products(query=None, category=None, min_toman=None, max_toman=N
 async def get_product(product_id):
     p = await get(f"products/{int(product_id)}")
     return _product_full(p)
+
+
+def _wp_get_sync(endpoint, params=None):
+    """درخواست به وردپرس REST (wp/v2) — برای مقالات/برگه‌های برند (عمومی، بدون auth)."""
+    url = f"{config.WOO_URL}/wp-json/wp/v2/{endpoint}"
+    last = None
+    for attempt in range(2):
+        try:
+            r = requests.get(url, params=params or {}, timeout=(4, 20))
+            r.raise_for_status()
+            return r.json()
+        except RequestException as e:
+            last = e
+            if attempt < 1:
+                time.sleep(1.0)
+    raise last
+
+
+async def get_brand_article(brand):
+    """مقاله/برگهٔ سایت دربارهٔ یک برند (تاریخچه/معرفی) را برمی‌گرداند؛ ترجیحاً عنوانش شاملِ نامِ برند است."""
+    brand = (brand or "").strip()
+    if not brand:
+        return None
+    bl = brand.lower()
+    fallback = None
+    for ep in ("posts", "pages"):
+        try:
+            items = await asyncio.to_thread(
+                _wp_get_sync, ep,
+                {"search": brand, "per_page": 5, "_fields": "title,excerpt,content,link"},
+            )
+        except Exception:  # noqa: BLE001 — اگر سایت/اندپوینت در دسترس نبود
+            items = []
+        for it in items or []:
+            title = strip_html((it.get("title") or {}).get("rendered"), 140)
+            body = (strip_html((it.get("excerpt") or {}).get("rendered"), 700)
+                    or strip_html((it.get("content") or {}).get("rendered"), 700))
+            if not (title and body):
+                continue
+            entry = {"title": title, "summary": body, "link": it.get("link", "")}
+            if bl in title.lower():  # بهترین تطابق: نامِ برند در عنوان
+                return entry
+            if fallback is None:
+                fallback = entry
+    return fallback
 
 
 async def get_briefs(ids):
