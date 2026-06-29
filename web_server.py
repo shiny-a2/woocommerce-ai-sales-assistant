@@ -7,7 +7,7 @@ from __future__ import annotations
 from typing import Any
 
 import uvicorn
-from fastapi import FastAPI, Header, HTTPException
+from fastapi import FastAPI, File, Header, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse, JSONResponse, Response
 from pydantic import BaseModel
@@ -15,6 +15,7 @@ from pydantic import BaseModel
 import assistant
 import botusers
 import config
+import llm
 
 CHANNEL = "web"
 _tg_app = None  # برای ارجاع به ادمین از طریق تلگرام (هنگام serve ست می‌شود)
@@ -78,6 +79,7 @@ class BrainChatIn(BaseModel):
     catalog: Any = None
     temperature: float | None = None
     max_tokens: int | None = None
+    cards_as_text: bool = True  # کانال‌هایی که خودشان کارت رندر می‌کنند → False (متنِ تمیز + cards ساختاریافته)
 
 
 def _check_sb_token(token):
@@ -100,17 +102,51 @@ async def brain_chat(body: BrainChatIn, x_sb_token: str = Header(None, alias="X-
     import time as _t
     _start = _t.monotonic()
     print(f"[brain] /api/chat دریافت شد ({len(body.messages or [])} پیام)")
-    text, ctx = await assistant.answer_messages(body.messages, body.user_prompt)
+    text, ctx = await assistant.answer_messages(
+        body.messages, body.user_prompt, render_cards_inline=body.cards_as_text)
     print(f"[brain] پاسخ آماده در {_t.monotonic() - _start:.1f} ثانیه (طول متن={len(text)})")
     handoff = ctx.get("handoff")
     return {
         "text": text,
+        # دادهٔ ساختاریافته برای کانال‌هایی که خودشان رندر می‌کنند (کارت/مدیا/سفارش/ارجاع):
+        "cards": ctx.get("cards") or [],
+        "wrist_media": ctx.get("wrist_media") or None,
+        "wrist_media_request": ctx.get("wrist_media_request") or None,
+        "wrist_media_company_stock": ctx.get("wrist_media_company_stock") or None,
+        "order": ctx.get("order") or None,
         "handoff": bool(handoff),
         "handoff_reason": (handoff or {}).get("reason", "") if handoff else "",
         "name_update": ctx.get("name_update") or None,
         "quota_used": 0,
         "quota_limit": 0,
     }
+
+
+class TranscribeIn(BaseModel):
+    audio_b64: str = ""
+    filename: str = "voice.ogg"
+
+
+@app.post("/api/transcribe")
+async def brain_transcribe(body: TranscribeIn, x_sb_token: str = Header(None, alias="X-SB-Token")):
+    """وویس→متن (همان Whisperِ مغز) تا همهٔ کانال‌ها از یک منبعِ واحد استفاده کنند.
+
+    صدا را base64 می‌گیرد (سازگار با کلاینتِ پایتون و Node) و متن را برمی‌گرداند.
+    """
+    _check_sb_token(x_sb_token)
+    import base64
+    try:
+        data = base64.b64decode(body.audio_b64 or "")
+    except Exception:  # noqa: BLE001
+        raise HTTPException(status_code=400, detail="invalid audio_b64")
+    if not data:
+        raise HTTPException(status_code=400, detail="empty audio")
+    try:
+        text = await llm.transcribe(data, (body.filename or "voice.ogg"))
+    except Exception as e:  # noqa: BLE001
+        print(f"[brain] خطای ترنسکرایب: {type(e).__name__}: {e}")
+        raise HTTPException(status_code=502, detail="transcription failed")
+    return {"text": (text or "").strip()}
 
 
 @app.get("/", response_class=HTMLResponse)

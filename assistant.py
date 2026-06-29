@@ -88,12 +88,16 @@ async def reply_image(channel, user_id, image_data_url, caption="", user_name=No
     return (answer, ctx)
 
 
-async def answer_messages(messages, system_extra=""):
-    """پاسخ به یک گفتگوی آماده (فرمت {role, content}) — برای اتصال CRM/sale-brain.
+async def answer_messages(messages, system_extra="", render_cards_inline=True):
+    """پاسخ به یک گفتگوی آماده (فرمت {role, content}) — برای اتصال CRM/sale-brain و کانال‌ها.
 
     پرسونای محصول‌آگاهِ ما + (اختیاری) دستور سیستمیِ CRM را ترکیب می‌کند و
     با ابزارهای ووکامرس پاسخ می‌سازد. خروجی: (متن، ctx) که ctx ممکن است
-    شامل {"handoff": {...}} باشد (وقتی مدل درخواست ارجاع به اپراتور داد).
+    شامل {"cards": [...], "wrist_media": {...}, "handoff": {...}, "order": {...}} باشد.
+
+    render_cards_inline=True: کارت‌ها را به‌صورت متن داخلِ پاسخ می‌پزد (برای کانالِ متن‌محور).
+    render_cards_inline=False: فقط مقدمهٔ تمیز را در متن می‌گذارد و کارت‌ها را ساختاریافته در
+    ctx['cards'] نگه می‌دارد تا کانال خودش آن‌ها را (به‌صورت عکس/کارت) رندر کند.
     """
     system = persona.system_prompt()
     if system_extra:
@@ -116,11 +120,13 @@ async def answer_messages(messages, system_extra=""):
         text = ""
     text = textfmt.clean_for_chat(text)
     cards = ctx.get("cards") or []
-    if cards:  # وب/CRM عکس‌کارت ندارد؛ متن را پاک و کارت‌ها را به‌صورت متن ضمیمه کن
+    if cards and render_cards_inline:  # کانالِ متن‌محور: متن را پاک و کارت‌ها را به‌صورت متن ضمیمه کن
         intro = textfmt.strip_product_lines(text) or "چند گزینهٔ خوب و مناسب براتون پیدا کردم 🌟 در ادامه ببینید:"
         text = (intro + "\n\n" + _cards_as_text(cards)).strip()
+    elif cards:  # کانال خودش کارت‌ها را رندر می‌کند → فقط مقدمهٔ تمیزِ گفتگویی
+        text = textfmt.strip_product_lines(text) or "چند گزینهٔ خوب و مناسب براتون پیدا کردم 🌟 در ادامه ببینید:"
     wm = ctx.get("wrist_media")
-    if wm and wm.get("ids"):  # چت سایت: لینکِ پستِ چنل (عمومی)
+    if wm and wm.get("ids") and render_cards_inline:  # چت سایت: لینکِ پستِ چنل (عمومی)
         links = "\n".join(f"https://t.me/{wm['channel']}/{i}" for i in wm["ids"][:4])
         text = (text + "\n\n🎥 عکس و ویدئوی روی مچ‌دستِ همین ساعت:\n" + links).strip()
     return (text, ctx)
