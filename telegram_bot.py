@@ -394,7 +394,7 @@ _CHANNEL_NOTIFY = {
     "instagram": "http://127.0.0.1:8092/api/notify",
     "whatsapp": "http://127.0.0.1:8093/api/notify",
 }
-_CHANNEL_FA = {"userbot": "تلگرام (یوزربات)", "instagram": "اینستاگرام", "whatsapp": "واتساپ"}
+_CHANNEL_FA = {"userbot": "تلگرام (یوزربات)", "instagram": "اینستاگرام", "whatsapp": "واتساپ", "telegram": "تلگرام (ربات رسمی)"}
 
 
 async def post_crosschannel_receipt(bot, image_bytes, channel, customer_id, name="", amount="", extra=""):
@@ -469,6 +469,28 @@ async def _on_xrcp_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         pass
 
 
+# ---------- ارجاعِ عکسِ پیدا‌نشده به همکاران (همهٔ کانال‌ها) ----------
+_escalations = {}   # group_message_id → {channel, customer_id, name}
+
+
+async def post_staff_escalation(bot, image_bytes, channel, customer_id, name="", question=""):
+    """عکسی که محصولش پیدا نشد را با سوالِ مشتری به گروهِ همکاران می‌فرستد تا ریپلای کنند."""
+    gid = config.STAFF_GROUP_ID or config.SUPPORT_GROUP_ID
+    if not gid or not image_bytes:
+        return False
+    cap = ("❓ سوالِ مشتری دربارهٔ این عکس — کانال: " + _CHANNEL_FA.get(channel, channel) + "\n"
+           + (f"👤 {name}\n" if name else "")
+           + (f"💬 «{question}»\n" if question else "")
+           + "\n👈 همکاران: روی همین پیام **ریپلای** کنید تا پاسختان مستقیم برای مشتری برود.")
+    try:
+        sent = await bot.send_photo(gid, photo=bytes(image_bytes), caption=cap)
+        _escalations[sent.message_id] = {"channel": channel, "customer_id": str(customer_id), "name": name}
+        return True
+    except Exception as e:  # noqa: BLE001
+        print(f"[tg] ارسالِ ارجاعِ عکس به همکاران ناموفق: {e}")
+        return False
+
+
 async def _on_group(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """پیام‌های گروه: لاگِ آیدی (برای پیکربندی) + دریافتِ مدیای همکار و تحویل."""
     m = update.effective_message
@@ -479,6 +501,22 @@ async def _on_group(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if m.chat_id not in known and m.chat_id not in _logged_groups:
         _logged_groups.add(m.chat_id)
         print(f"[tg] گروه شناسایی شد → id={m.chat_id} | {m.chat.title}")
+    # ریپلایِ همکار روی «ارجاعِ عکس» → پاسخ به مشتری در همان کانال (متن)
+    if config.STAFF_GROUP_ID and m.chat_id == config.STAFF_GROUP_ID and m.reply_to_message:
+        esc = _escalations.get(m.reply_to_message.message_id)
+        if esc:
+            answer = (m.text or m.caption or "").strip()
+            if answer:
+                txt = "پاسخِ همکارانِ ما 🌟\n" + answer
+                if esc["channel"] == "telegram":
+                    try:
+                        await context.bot.send_message(int(esc["customer_id"]), txt)
+                    except Exception as e:  # noqa: BLE001
+                        print(f"[tg] اعلامِ پاسخِ ارجاع به مشتری ناموفق: {e}")
+                else:
+                    await _notify_channel(esc["channel"], esc["customer_id"], txt)
+                _escalations.pop(m.reply_to_message.message_id, None)
+            return
     # رسیدگی به مدیای همکار فقط در گروهِ کاری (staff)
     if not config.STAFF_GROUP_ID or m.chat_id != config.STAFF_GROUP_ID or not m.reply_to_message:
         return
@@ -661,6 +699,10 @@ async def _on_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await msg.reply_text("متأسفانه نتونستم عکس رو دریافت کنم 🙏 لطفاً یک‌بارِ دیگه ارسالش کنید.")
         return
     answer, ctx = await assistant.reply_image(CHANNEL, user.id, url, msg.caption or "", user_name=_full_name(user))
+    if not ctx.get("cards") and not ctx.get("receipt"):  # محصول از عکس پیدا نشد → ارجاع به همکاران
+        if await post_staff_escalation(context.bot, data, "telegram", user.id, name=_full_name(user), question=(msg.caption or "")):
+            await msg.reply_text("عکستون رو دیدم 🙏 همین الان از همکارانم می‌پرسم و تا چند دقیقهٔ دیگه جوابتون رو همین‌جا می‌فرستم 🌟")
+            return
     await _deliver(context, msg, user, "[تصویر]", answer, ctx)
 
 

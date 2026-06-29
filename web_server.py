@@ -151,25 +151,43 @@ async def brain_vision(body: VisionIn, x_sb_token: str = Header(None, alias="X-S
     text, ctx = await assistant.answer_image(
         data_url, body.caption, body.messages, render_cards_inline=body.cards_as_text)
     receipt = ctx.get("receipt")
-    # اگر تصویر «فیشِ پرداخت» بود و کانال مشخص شده → به گروهِ سفارش‌ها با دکمهٔ تایید/رد بفرست
-    if receipt and body.customer and body.image_b64 and _tg_app:
+    cards = ctx.get("cards") or []
+    escalated = False
+    cust = body.customer or {}
+    if receipt and cust and body.image_b64 and _tg_app:
+        # تصویرِ «فیشِ پرداخت» → به گروهِ سفارش‌ها با دکمهٔ تایید/رد
         try:
             import base64 as _b64
 
             import telegram_bot
             img = _b64.b64decode(body.image_b64)
-            cust = body.customer or {}
             extra = " ".join(x for x in (receipt.get("tracking", ""), receipt.get("note", "")) if x).strip()
             await telegram_bot.post_crosschannel_receipt(
                 _tg_app.bot, img, cust.get("channel", ""), cust.get("id", ""),
                 name=cust.get("name", ""), amount=receipt.get("amount", ""), extra=extra)
         except Exception as e:  # noqa: BLE001
             print(f"[brain] ارسالِ رسیدِ کانالی به گروه ناموفق: {type(e).__name__}: {e}")
+    elif (not cards) and cust and body.image_b64 and _tg_app:
+        # عکسِ ساعت/پست/استوری بود ولی محصولی پیدا نشد → ارجاع به همکاران (همهٔ کانال‌ها)
+        try:
+            import base64 as _b64
+
+            import telegram_bot
+            img = _b64.b64decode(body.image_b64)
+            escalated = await telegram_bot.post_staff_escalation(
+                _tg_app.bot, img, cust.get("channel", ""), cust.get("id", ""),
+                name=cust.get("name", ""), question=(body.caption or ""))
+            if escalated:
+                text = ("عکستون رو دیدم 🙏 برای اینکه دقیق راهنماییتون کنم همین الان از همکارانم می‌پرسم و "
+                        "تا چند دقیقهٔ دیگه جوابتون رو همین‌جا می‌فرستم 🌟")
+        except Exception as e:  # noqa: BLE001
+            print(f"[brain] ارجاعِ عکس به همکاران ناموفق: {type(e).__name__}: {e}")
     handoff = ctx.get("handoff")
     return {
         "text": text,
-        "cards": ctx.get("cards") or [],
+        "cards": cards,
         "receipt": bool(receipt),
+        "escalated": bool(escalated),
         "handoff": bool(handoff),
         "handoff_reason": (handoff or {}).get("reason", "") if handoff else "",
     }
