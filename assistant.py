@@ -20,7 +20,15 @@ def _name_hint(user_name):
     return {"role": "system", "content": f"نامِ تلگرامیِ این کاربر: «{nm}». او را با همین نام و محترمانه صدا بزن، نه اسمِ دیگری."}
 
 
-async def reply(channel, user_id, text, user_name=None):
+def _phone_hint(phone):
+    p = (phone or "").strip()
+    if not p:
+        return None
+    return {"role": "system", "content": f"شمارهٔ تماسِ این مشتری از قبل موجود است: «{p}». "
+            "برای ثبتِ سفارش/پیگیری از همین شماره استفاده کن و دوباره شماره نپرس."}
+
+
+async def reply(channel, user_id, text, user_name=None, customer_phone=None):
     """یک پیام را پاسخ می‌دهد.
 
     خروجی: (متن پاسخ، ctx) که ctx ممکن است شامل {"handoff": {...}} باشد.
@@ -34,6 +42,9 @@ async def reply(channel, user_id, text, user_name=None):
     hint = _name_hint(user_name)
     if hint:
         messages.append(hint)
+    ph = _phone_hint(customer_phone)
+    if ph:
+        messages.append(ph)
     messages.extend(sessions.history(channel, user_id))
     messages.append({"role": "user", "content": text})
 

@@ -32,6 +32,8 @@ app.add_middleware(
 class ChatIn(BaseModel):
     session_id: str
     message: str
+    phone: str = ""   # شمارهٔ تماسِ کاربرِ سایت (اگر موجود) — تا دوباره پرسیده نشود
+    name: str = ""
 
 
 @app.get("/health")
@@ -48,7 +50,8 @@ async def stats():
 @app.post("/chat")
 async def chat(body: ChatIn):
     sid = (body.session_id or "anon").strip()[:64]
-    answer, ctx = await assistant.reply(CHANNEL, sid, body.message)
+    answer, ctx = await assistant.reply(
+        CHANNEL, sid, body.message, user_name=(body.name or None), customer_phone=(body.phone or None))
     if ctx.get("handoff"):
         await _notify_admins(sid, body.message, ctx["handoff"])
     return JSONResponse({"reply": answer})
@@ -280,9 +283,10 @@ _EMBED_JS = r"""
     var t = tx.value.trim(); if(!t) return;
     tx.value=''; add(t,'u');
     var typing = add('در حال نوشتن…','a');
+    var cust = (window.JG_CUSTOMER || {});
     fetch(base + '/chat', {
       method:'POST', headers:{'Content-Type':'application/json'},
-      body: JSON.stringify({session_id: sid, message: t})
+      body: JSON.stringify({session_id: sid, message: t, phone: cust.phone || '', name: cust.name || ''})
     }).then(function(r){return r.json();})
       .then(function(j){ typing.innerHTML = linkify(j.reply || '...'); msgs.scrollTop=msgs.scrollHeight; })
       .catch(function(){ typing.textContent = 'ارتباط برقرار نشد 🙏 لطفاً دوباره تلاش کنید.'; });
