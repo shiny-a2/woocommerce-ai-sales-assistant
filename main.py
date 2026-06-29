@@ -71,6 +71,9 @@ async def main():
         await asyncio.sleep(10)
         return
 
+    import clock  # تصحیحِ ساعتِ کجِ سرور (برای سلامِ زمان‌دار: صبح/ظهر/عصر/شب بخیر)
+    await clock.refresh()
+
     app = Application.builder().token(config.TELEGRAM_BOT_TOKEN).build()
     app.add_error_handler(_on_error)
     telegram_bot.register_handlers(app)
