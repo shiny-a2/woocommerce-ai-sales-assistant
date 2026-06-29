@@ -28,9 +28,9 @@ def strip_product_lines(text):
             continue
         if _PROD_PREFIX.match(s):  # خطِ کارتِ محصول (با ایموجی شروع می‌شود)
             continue
-        if ("http" in s or "مشاهده جزئیات" in s or "مشاهده در سایت" in s
-                or "قیمت" in s or "لینک" in s or "وضعیت" in s
-                or "زمان ارسال" in s or "ارسال فوری" in s or "روز کاری" in s):
+        # فقط نشانگرهای قطعیِ خط‌کارت/دکمه — نه کلماتِ پرتکرارِ فارسی (قیمت/لینک/وضعیت/ارسال فوری)
+        # که در جملاتِ عادیِ گفتگو هم می‌آیند و متنِ سالم را خراب می‌کنند.
+        if "http" in s or "مشاهده جزئیات" in s or "مشاهده در سایت" in s:
             continue
         if _LIST_PREFIX.match(s):
             continue
