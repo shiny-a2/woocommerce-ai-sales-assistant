@@ -84,6 +84,7 @@ class BrainChatIn(BaseModel):
     max_tokens: int | None = None
     cards_as_text: bool = True  # کانال‌هایی که خودشان کارت رندر می‌کنند → False (متنِ تمیز + cards ساختاریافته)
     reply_context: dict | None = None  # کارتی که مشتری به آن ریپلای کرده {"url"/"name"/"reference"}
+    customer: dict | None = None  # {channel, id, name} — برای ردگیریِ کارت‌های نشان‌داده‌شده (عدمِ‌تکرار/صفحه‌بندی)
 
 
 def _check_sb_token(token):
@@ -108,7 +109,7 @@ async def brain_chat(body: BrainChatIn, x_sb_token: str = Header(None, alias="X-
     print(f"[brain] /api/chat دریافت شد ({len(body.messages or [])} پیام)")
     text, ctx = await assistant.answer_messages(
         body.messages, body.user_prompt, render_cards_inline=body.cards_as_text,
-        reply_context=body.reply_context)
+        reply_context=body.reply_context, customer=body.customer)
     print(f"[brain] پاسخ آماده در {_t.monotonic() - _start:.1f} ثانیه (طول متن={len(text)})")
     handoff = ctx.get("handoff")
     return {

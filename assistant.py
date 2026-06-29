@@ -137,7 +137,7 @@ async def _reply_context_sheet(rc):
             "محصولِ دیگری را با آن اشتباه نگیر و کارتِ جدید نشان نده مگر مشتری صریحاً بخواهد.")
 
 
-async def answer_messages(messages, system_extra="", render_cards_inline=True, reply_context=None):
+async def answer_messages(messages, system_extra="", render_cards_inline=True, reply_context=None, customer=None):
     """پاسخ به یک گفتگوی آماده (فرمت {role, content}) — برای اتصال CRM/sale-brain و کانال‌ها.
 
     پرسونای محصول‌آگاهِ ما + (اختیاری) دستور سیستمیِ CRM را ترکیب می‌کند و
@@ -167,6 +167,10 @@ async def answer_messages(messages, system_extra="", render_cards_inline=True, r
         return ("", {})
 
     ctx: dict = {}
+    # ردگیریِ کارت‌های نشان‌داده‌شده per (channel,user) → عدمِ‌تکرار + صفحه‌بندیِ ۷→۵→۳ روی کانال‌ها
+    _ck = (str(customer.get("channel") or "ch"), str(customer.get("id"))) if (customer and customer.get("id")) else None
+    if _ck:
+        ctx["shown_ids"] = list(sessions.shown_ids(_ck[0], _ck[1]))
     try:
         text = await llm.chat(convo, ctx)
     except Exception as e:  # noqa: BLE001
@@ -180,9 +184,11 @@ async def answer_messages(messages, system_extra="", render_cards_inline=True, r
     elif cards:  # کانال خودش کارت‌ها را رندر می‌کند → فقط مقدمهٔ تمیزِ گفتگویی
         text = textfmt.strip_product_lines(text) or "چند گزینهٔ خوب و مناسب براتون پیدا کردم 🌟 در ادامه ببینید:"
     wm = ctx.get("wrist_media")
-    if wm and wm.get("ids") and render_cards_inline:  # چت سایت: لینکِ پستِ چنل (عمومی)
+    if wm and wm.get("ids"):  # لینکِ پستِ چنلِ مدیای روی‌مچ — برای همهٔ کانال‌ها (نه فقط چت‌سایت)
         links = "\n".join(f"https://t.me/{wm['channel']}/{i}" for i in wm["ids"][:4])
         text = (text + "\n\n🎥 عکس و ویدئوی روی مچ‌دستِ همین ساعت:\n" + links).strip()
+    if _ck and ctx.get("cards"):  # ثبتِ کارت‌های نشان‌داده‌شده تا دفعهٔ بعد تکرار نشوند
+        sessions.add_shown(_ck[0], _ck[1], [c.get("id") for c in ctx["cards"] if c.get("id")])
     return (text, ctx)
 
 
