@@ -97,12 +97,17 @@ async def _reply_context_sheet(rc):
     try:
         brief = await woo.resolve_product(
             url=(rc.get("url") or ""), name=(rc.get("name") or ""), reference=(rc.get("reference") or ""))
-        if not brief or not brief.get("id"):
-            return ""
-        full = await woo.get_product(brief["id"])
     except Exception as e:  # noqa: BLE001
         print(f"[assistant] resolveِ محصولِ ریپلای ناموفق: {type(e).__name__}: {e}")
         return ""
+    if not brief or not brief.get("id"):
+        print(f"[assistant] resolve بدون نتیجه: url={rc.get('url')!r} name={rc.get('name')!r}")
+        return ""
+    try:
+        full = await woo.get_product(brief["id"])
+    except Exception as e:  # noqa: BLE001
+        print(f"[assistant] get_product ناموفق ({brief['id']})؛ از brief استفاده می‌کنم: {type(e).__name__}: {e}")
+        full = brief  # به‌جای خطای کامل، با همان خلاصهٔ کارت جواب بده
     parts = [full.get("name", "")]
     if full.get("price_label"):
         parts.append("قیمت: " + full["price_label"])

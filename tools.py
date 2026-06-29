@@ -270,6 +270,16 @@ async def dispatch(name, args_json, ctx):
 
         if name == "find_by_reference":
             items = await woo.search_by_reference(args.get("reference", ""))
+            if not items and ctx.get("shown_ids"):
+                # جستجوی متنیِ ووکامرس گاهی بارِ دوم خالی برمی‌گردد؛ اگر محصولی قبلاً در همین
+                # گفتگو نشان داده شده، همان‌ها را بده تا مدل اشتباهاً نگوید «ناموجود».
+                shown = await woo.get_briefs(ctx.get("shown_ids") or [])
+                return _json({
+                    "count": 0, "products": [],
+                    "previously_shown": shown[-7:],
+                    "note": "با این کد چیزی پیدا نشد، ولی این محصولات قبلاً در همین گفتگو نشان داده شده‌اند و موجودند. "
+                            "اگر کد به یکی از این‌ها اشاره دارد، درباره‌اش بگو و هرگز نگو «ناموجود». اگر مطمئن نیستی، مؤدبانه کد را دوباره از مشتری بپرس.",
+                })
             return _json({
                 "count": len(items),
                 "products": items,
