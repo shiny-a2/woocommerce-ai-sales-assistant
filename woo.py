@@ -475,6 +475,15 @@ async def search_watches(gender=None, movement=None, dial_color=None, strap_colo
 
         rows = [r for r in rows if _strap_ok(r[1])]
 
+    # برند: اگر مشتری برند خواست، فقط همان برند (حتی وقتی رنگ/معیارِ دیگری primary بوده)
+    if brand:
+        _b = brand.strip()
+        rows = [r for r in rows if any(_b in (o or "") or (o or "") in _b for o in attr_options(r[1], "نام برند"))]
+    # نوعِ موتور: اگر مشتری خواست، فقط همان
+    if movement:
+        _m = movement.strip()
+        rows = [r for r in rows if any(_m in (o or "") for o in attr_options(r[1], "نوع موتور"))]
+
     # اولویت‌بندیِ نمایش: اول «ارسال فوری» (موجودیِ فروشگاه)، بعد گارانتیِ نامحسوسِ جواهرتایم
     def _jewel(p):
         return any(("جواهرتایم" in g) or ("جواهر تایم" in g) for g in attr_options(p, "گارانتی کننده در ایران"))

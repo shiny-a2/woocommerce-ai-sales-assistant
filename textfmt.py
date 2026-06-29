@@ -11,11 +11,13 @@ _MULTINL = re.compile(r"\n{3,}")
 
 
 _LIST_PREFIX = re.compile(r"^\s*(?:[•\-\*]|\d+[\.\)])\s")
+# خطوطِ کارتِ محصول معمولاً با این ایموجی‌ها شروع می‌شوند (نام/قیمت/لینک/وضعیت/تخفیف)
+_PROD_PREFIX = re.compile(r"^\s*(?:⌚|💰|🔗|⚡|🚚|🔖|✨|🌐|📦|🎥|⛓)")
 
 
 def strip_product_lines(text):
-    """وقتی محصولات به‌صورت کارت نمایش داده می‌شوند، خطوطِ تکراریِ محصول را از متن حذف
-    می‌کند و فقط مقدمه/جمع‌بندیِ گفتگویی را نگه می‌دارد."""
+    """وقتی محصولات جدا (کارت/متنِ کارت) نمایش داده می‌شوند، خطوطِ تکراریِ محصول را از
+    متنِ مدل حذف می‌کند و فقط مقدمه/جمع‌بندیِ گفتگویی را نگه می‌دارد (تا دوبار نیاید)."""
     if not text:
         return ""
     keep = []
@@ -24,7 +26,10 @@ def strip_product_lines(text):
         if not s:
             keep.append("")
             continue
-        if ("http" in s or "قیمت" in s or "لینک" in s or "وضعیت" in s
+        if _PROD_PREFIX.match(s):  # خطِ کارتِ محصول (با ایموجی شروع می‌شود)
+            continue
+        if ("http" in s or "مشاهده جزئیات" in s or "مشاهده در سایت" in s
+                or "قیمت" in s or "لینک" in s or "وضعیت" in s
                 or "زمان ارسال" in s or "ارسال فوری" in s or "روز کاری" in s):
             continue
         if _LIST_PREFIX.match(s):
