@@ -484,11 +484,12 @@ async def _handle_wrist(context, msg, user, product_id):
     await _deliver(context, msg, user, msg.text, answer, ctx)
 
 
-async def _resolve_product_id(name):
-    """آیدیِ محصول را از روی نامِ کارت پیدا می‌کند (برای کارت‌های قدیمی که آیدی ذخیره ندارند)."""
+async def _resolve_product_id(name, url="", reference=""):
+    """آیدیِ محصولِ کارت را **دقیق** پیدا می‌کند: اول اسلاگِ url (یکتا)، بعد کدِ رفرنس، بعد نام.
+    (جلوگیری از resolveِ اشتباه — مثلِ کارتِ تروساردی که به سیتیزن می‌خورد.)"""
     try:
-        items = await woo.search_by_reference(name, limit=1)
-        return items[0].get("id") if items else None
+        b = await woo.resolve_product(url=url, name=name, reference=reference)
+        return b.get("id") if b else None
     except Exception:  # noqa: BLE001
         return None
 
@@ -525,8 +526,8 @@ async def _on_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 or _card_from_message(msg.reply_to_message))  # fallback از خودِ کارت برای کارت‌های قدیمی
         if prod:
             pid = prod.get("id")
-            if not pid and prod.get("name"):  # کارتِ قدیمی: آیدی را از نامِ کارت پیدا کن
-                pid = await _resolve_product_id(prod["name"])
+            if not pid and (prod.get("name") or prod.get("url")):  # کارتِ قدیمی: با url/کد/نام دقیق پیدا کن
+                pid = await _resolve_product_id(prod.get("name", ""), prod.get("url", ""), prod.get("reference", ""))
             # درخواستِ عکس/ویدئوی روی مچ → همین محصول را قطعی تحویل بده
             if pid and _wants_wrist(msg.text):
                 await context.bot.send_chat_action(chat_id=msg.chat_id, action=ChatAction.TYPING)

@@ -8,6 +8,7 @@ import llm
 import persona
 import sessions
 import textfmt
+import woo
 
 _FALLBACK = "ببخشید، یک اشکالِ فنیِ کوچک پیش اومد 🙏 لطفاً چند لحظهٔ دیگه دوباره بفرمایید؛ در خدمتم."
 
@@ -88,7 +89,39 @@ async def reply_image(channel, user_id, image_data_url, caption="", user_name=No
     return (answer, ctx)
 
 
-async def answer_messages(messages, system_extra="", render_cards_inline=True):
+async def _reply_context_sheet(rc):
+    """مشخصاتِ کاملِ محصولی که مشتری به کارتش ریپلای کرده — برای تزریقِ قطعی به مغز.
+
+    rc: {"url"/"name"/"reference"} از کارتِ ریپلای‌شده. محصول را دقیق resolve می‌کند (slug/کدِ رفرنس)
+    تا با محصولِ دیگری اشتباه نشود (ریشهٔ باگِ تروساردی→سیتیزن)."""
+    try:
+        brief = await woo.resolve_product(
+            url=(rc.get("url") or ""), name=(rc.get("name") or ""), reference=(rc.get("reference") or ""))
+        if not brief or not brief.get("id"):
+            return ""
+        full = await woo.get_product(brief["id"])
+    except Exception as e:  # noqa: BLE001
+        print(f"[assistant] resolveِ محصولِ ریپلای ناموفق: {type(e).__name__}: {e}")
+        return ""
+    parts = [full.get("name", "")]
+    if full.get("price_label"):
+        parts.append("قیمت: " + full["price_label"])
+    if full.get("shipping_time"):
+        parts.append("ارسال: " + full["shipping_time"])
+    for a in (full.get("attributes") or []):
+        nm = (a.get("name") or "").strip()
+        opts = a.get("options") or []
+        if nm and opts:
+            parts.append(f"{nm}: " + "، ".join(str(o) for o in opts))
+    sheet = " | ".join(x for x in parts if x)
+    if not sheet:
+        return ""
+    return ("⚡ مشتری به کارتِ یک محصولِ مشخص ریپلای کرده و دربارهٔ **همان** می‌پرسد. "
+            f"مشخصاتِ کاملِ همان محصول: {sheet}. فقط دربارهٔ همین محصول جواب بده، "
+            "محصولِ دیگری را با آن اشتباه نگیر و کارتِ جدید نشان نده مگر مشتری صریحاً بخواهد.")
+
+
+async def answer_messages(messages, system_extra="", render_cards_inline=True, reply_context=None):
     """پاسخ به یک گفتگوی آماده (فرمت {role, content}) — برای اتصال CRM/sale-brain و کانال‌ها.
 
     پرسونای محصول‌آگاهِ ما + (اختیاری) دستور سیستمیِ CRM را ترکیب می‌کند و
@@ -100,8 +133,13 @@ async def answer_messages(messages, system_extra="", render_cards_inline=True):
     ctx['cards'] نگه می‌دارد تا کانال خودش آن‌ها را (به‌صورت عکس/کارت) رندر کند.
     """
     system = persona.system_prompt()
-    if system_extra:
-        system = system + "\n\n" + system_extra.strip()
+    extra = (system_extra or "").strip()
+    if reply_context:  # مشتری به کارتِ یک محصول ریپلای کرده → مشخصاتِ همان را قطعی تزریق کن
+        sheet = await _reply_context_sheet(reply_context)
+        if sheet:
+            extra = (extra + "\n\n" + sheet).strip() if extra else sheet
+    if extra:
+        system = system + "\n\n" + extra
 
     convo = [{"role": "system", "content": system}]
     for m in messages or []:

@@ -263,6 +263,52 @@ async def search_by_reference(reference, limit=6):
     return out
 
 
+_REF_RE = re.compile(r"\b([A-Za-z]{1,5}[ -]?\d{3,}[A-Za-z0-9.\-]*)\b")  # کدِ رفرنس مثل R2453125506 یا BF2018-52E
+
+
+def _slug_from_url(url):
+    """آخرین بخشِ مسیرِ url (اسلاگِ محصول) را دیکدشده برمی‌گرداند: /product/<slug>/ ."""
+    if not url:
+        return ""
+    try:
+        import urllib.parse as _up
+        parts = [p for p in _up.urlparse(url).path.split("/") if p]
+        return _up.unquote(parts[-1]) if parts else ""
+    except Exception:  # noqa: BLE001
+        return ""
+
+
+async def resolve_product(url="", name="", reference=""):
+    """محصولِ یک کارت را **دقیق** پیدا می‌کند تا با محصولِ دیگری اشتباه نشود:
+    اولویت ۱) اسلاگِ url (یکتا) ۲) کدِ رفرنس (از reference یا داخلِ نام) ۳) نام. خروجی: brief یا None."""
+    slug = _slug_from_url(url)
+    if slug:
+        try:
+            items = await get("products", {"slug": slug, "status": "publish"})
+            if items:
+                return _product_brief(items[0])
+        except Exception:  # noqa: BLE001
+            pass
+    code = (reference or "").strip()
+    if not code and name:
+        m = _REF_RE.search(name)
+        if m:
+            code = m.group(1).strip()
+    if code:
+        items = await search_by_reference(code, limit=4)
+        norm = code.lower().replace(" ", "").replace("-", "")
+        for b in items:  # دقیق: کدِ رفرنس باید در نامِ محصول باشد
+            if norm and norm in (b.get("name") or "").lower().replace(" ", "").replace("-", ""):
+                return b
+        if items:
+            return items[0]
+    if name:
+        items = await search_by_reference(name, limit=1)
+        if items:
+            return items[0]
+    return None
+
+
 async def list_categories(limit=40):
     cats = await get("products/categories", {"per_page": limit, "orderby": "count", "order": "desc", "hide_empty": True})
     return [{"id": c.get("id"), "name": c.get("name"), "count": c.get("count")} for c in cats]
