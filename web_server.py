@@ -131,6 +131,7 @@ class VisionIn(BaseModel):
     caption: str = ""
     messages: list = []
     cards_as_text: bool = True
+    customer: dict | None = None  # {channel, id, name} — برای ارسالِ رسید به گروهِ سفارش‌ها
 
 
 @app.post("/api/vision")
@@ -146,10 +147,26 @@ async def brain_vision(body: VisionIn, x_sb_token: str = Header(None, alias="X-S
         raise HTTPException(status_code=400, detail="no image")
     text, ctx = await assistant.answer_image(
         data_url, body.caption, body.messages, render_cards_inline=body.cards_as_text)
+    receipt = ctx.get("receipt")
+    # اگر تصویر «فیشِ پرداخت» بود و کانال مشخص شده → به گروهِ سفارش‌ها با دکمهٔ تایید/رد بفرست
+    if receipt and body.customer and body.image_b64 and _tg_app:
+        try:
+            import base64 as _b64
+
+            import telegram_bot
+            img = _b64.b64decode(body.image_b64)
+            cust = body.customer or {}
+            extra = " ".join(x for x in (receipt.get("tracking", ""), receipt.get("note", "")) if x).strip()
+            await telegram_bot.post_crosschannel_receipt(
+                _tg_app.bot, img, cust.get("channel", ""), cust.get("id", ""),
+                name=cust.get("name", ""), amount=receipt.get("amount", ""), extra=extra)
+        except Exception as e:  # noqa: BLE001
+            print(f"[brain] ارسالِ رسیدِ کانالی به گروه ناموفق: {type(e).__name__}: {e}")
     handoff = ctx.get("handoff")
     return {
         "text": text,
         "cards": ctx.get("cards") or [],
+        "receipt": bool(receipt),
         "handoff": bool(handoff),
         "handoff_reason": (handoff or {}).get("reason", "") if handoff else "",
     }

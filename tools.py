@@ -189,6 +189,22 @@ SCHEMAS = [
             },
         },
     },
+    {
+        "type": "function",
+        "function": {
+            "name": "payment_receipt",
+            "description": "وقتی تصویرِ ارسالیِ مشتری یک فیش/رسیدِ پرداختِ بانکی است این را صدا بزن (نه برای عکسِ ساعت). مبلغ و اطلاعاتِ خواندنیِ رسید را از روی تصویر بده.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "amount": {"type": "string", "description": "مبلغِ واریز اگر روی رسید خواناست (با واحد، مثل «۲۹٬۹۰۰٬۰۰۰ تومان»)"},
+                    "tracking": {"type": "string", "description": "شمارهٔ پیگیری/مرجعِ تراکنش اگر خواناست (اختیاری)"},
+                    "note": {"type": "string", "description": "نکتهٔ دیگرِ خواندنی مثل تاریخ یا بانک (اختیاری)"},
+                },
+                "required": [],
+            },
+        },
+    },
 ]
 
 
@@ -322,6 +338,14 @@ async def dispatch(name, args_json, ctx):
                 "notes": (args.get("notes") or "").strip(),
             }
             return _json({"ok": True, "message": "سفارش ثبتِ اولیه شد؛ حالا اطلاعاتِ پرداخت را بده و عکسِ فیش را از مشتری بخواه."})
+
+        if name == "payment_receipt":
+            ctx["receipt"] = {
+                "amount": (args.get("amount") or "").strip(),
+                "tracking": (args.get("tracking") or "").strip(),
+                "note": (args.get("note") or "").strip(),
+            }
+            return _json({"ok": True, "message": "رسید دریافت شد؛ به همکاران برای تایید ارجاع می‌شود. به مشتری بگو «رسیدتون رسید، بعد از بررسی تاییدش رو اعلام می‌کنیم»."})
 
         if name == "save_customer_name":
             ctx["name_update"] = {

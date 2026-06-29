@@ -386,6 +386,89 @@ async def _on_order_callback(update: Update, context: ContextTypes.DEFAULT_TYPE)
         pass
 
 
+# ---------- رسیدِ کانال‌های دیگر (یوزربات/واتساپ/اینستا) → گروهِ سفارش‌ها + اعلامِ بازگشتی ----------
+_xrcp_pending = {}   # oid → {channel, customer_id, name}
+_xrcp_seq = 0
+_CHANNEL_NOTIFY = {
+    "userbot": "http://127.0.0.1:8091/api/notify",
+    "instagram": "http://127.0.0.1:8092/api/notify",
+    "whatsapp": "http://127.0.0.1:8093/api/notify",
+}
+_CHANNEL_FA = {"userbot": "تلگرام (یوزربات)", "instagram": "اینستاگرام", "whatsapp": "واتساپ"}
+
+
+async def post_crosschannel_receipt(bot, image_bytes, channel, customer_id, name="", amount="", extra=""):
+    """رسیدِ یک کانالِ دیگر را به گروهِ سفارش‌ها با دکمهٔ تایید/رد می‌فرستد. خروجی: True اگر فرستاده شد."""
+    global _xrcp_seq
+    gid = config.ORDERS_GROUP_ID
+    if not gid or not image_bytes:
+        return False
+    _xrcp_seq += 1
+    oid = str(_xrcp_seq)
+    cap = ("🧾 فیشِ پرداخت — کانال: " + _CHANNEL_FA.get(channel, channel) + "\n"
+           + (f"👤 {name}\n" if name else "")
+           + (f"💰 مبلغ: {amount}\n" if amount else "")
+           + (f"📝 {extra}\n" if extra else "")
+           + "\nبعد از بررسیِ فیش، یکی از دکمه‌ها را بزنید 👇")
+    kb = InlineKeyboardMarkup([[
+        InlineKeyboardButton("✅ تایید سفارش", callback_data=f"xrcp:ok:{oid}"),
+        InlineKeyboardButton("❌ رد", callback_data=f"xrcp:no:{oid}"),
+    ]])
+    try:
+        await bot.send_photo(gid, photo=bytes(image_bytes), caption=cap, reply_markup=kb)
+        _xrcp_pending[oid] = {"channel": channel, "customer_id": str(customer_id), "name": name}
+        return True
+    except Exception as e:  # noqa: BLE001
+        print(f"[tg] ارسالِ رسیدِ کانالِ {channel} به گروه ناموفق: {e}")
+        return False
+
+
+async def _notify_channel(channel, customer_id, text):
+    url = _CHANNEL_NOTIFY.get(channel)
+    if not url:
+        return
+    try:
+        async with httpx.AsyncClient(timeout=15) as c:
+            await c.post(url, json={"customer_id": str(customer_id), "text": text},
+                         headers={"X-SB-Token": config.SALE_BRAIN_TOKEN})
+    except Exception as e:  # noqa: BLE001
+        print(f"[tg] اعلامِ نتیجه به کانالِ {channel} ناموفق: {e}")
+
+
+async def _on_xrcp_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """تیک/ضربدرِ همکار روی رسیدِ کانالِ دیگر → اعلام به مشتری در همان کانال."""
+    q = update.callback_query
+    if not q:
+        return
+    await q.answer()
+    parts = (q.data or "").split(":")
+    if len(parts) != 3 or parts[0] != "xrcp":
+        return
+    action, oid = parts[1], parts[2]
+    info = _xrcp_pending.pop(oid, None)
+    base_cap = (q.message.caption if q.message else "") or ""
+    if not info:
+        try:
+            await q.edit_message_caption(caption=base_cap + "\n\n⌛ قبلاً رسیدگی شده.")
+        except Exception:  # noqa: BLE001
+            pass
+        return
+    by = update.effective_user.full_name if update.effective_user else ""
+    if action == "ok":
+        txt = ("سفارشتون تایید شد ✅🎉\nپرداختتون ثبت شد و سفارش وارد مرحلهٔ آماده‌سازی و ارسال می‌شه. "
+               "کدِ رهگیری رو به‌زودی خدمتتون اعلام می‌کنیم. ممنون از خریدتون 🌹")
+        tag = "\n\n✅ تایید شد" + (f" — {by}" if by else "")
+    else:
+        txt = ("سلام 🙏 متأسفانه فیشِ پرداختتون تایید نشد. لطفاً یک‌بار بررسی کنید یا با پشتیبانی "
+               "(۰۹۱۲۰۱۶۳۵۶۳) هماهنگ کنید تا سریع حلش کنیم.")
+        tag = "\n\n❌ رد شد" + (f" — {by}" if by else "")
+    await _notify_channel(info["channel"], info["customer_id"], txt)
+    try:
+        await q.edit_message_caption(caption=base_cap + tag)
+    except Exception:  # noqa: BLE001
+        pass
+
+
 async def _on_group(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """پیام‌های گروه: لاگِ آیدی (برای پیکربندی) + دریافتِ مدیای همکار و تحویل."""
     m = update.effective_message
@@ -629,4 +712,5 @@ def register_handlers(app: Application):
     app.add_handler(MessageHandler(filters.ChatType.PRIVATE & (filters.VOICE | filters.AUDIO), _on_voice))
     app.add_handler(MessageHandler(filters.ChatType.PRIVATE & filters.TEXT & ~filters.COMMAND, _on_message))
     app.add_handler(CallbackQueryHandler(_on_order_callback, pattern=r"^ord:"))
+    app.add_handler(CallbackQueryHandler(_on_xrcp_callback, pattern=r"^xrcp:"))
     app.add_handler(MessageHandler(filters.ChatType.GROUPS, _on_group))
