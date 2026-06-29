@@ -484,7 +484,7 @@ async def post_staff_escalation(bot, image_bytes, channel, customer_id, name="",
            + "\n👈 همکاران: روی همین پیام **ریپلای** کنید تا پاسختان مستقیم برای مشتری برود.")
     try:
         sent = await bot.send_photo(gid, photo=bytes(image_bytes), caption=cap)
-        _escalations[sent.message_id] = {"channel": channel, "customer_id": str(customer_id), "name": name}
+        _escalations[sent.message_id] = {"channel": channel, "customer_id": str(customer_id), "name": name, "question": question}
         return True
     except Exception as e:  # noqa: BLE001
         print(f"[tg] ارسالِ ارجاعِ عکس به همکاران ناموفق: {e}")
@@ -507,7 +507,8 @@ async def _on_group(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if esc:
             answer = (m.text or m.caption or "").strip()
             if answer:
-                txt = "پاسخِ همکارانِ ما 🌟\n" + answer
+                import assistant
+                txt = await assistant.polish_staff_reply(answer, esc.get("question", "")) or answer
                 if esc["channel"] == "telegram":
                     try:
                         await context.bot.send_message(int(esc["customer_id"]), txt)

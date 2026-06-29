@@ -186,18 +186,37 @@ async def answer_messages(messages, system_extra="", render_cards_inline=True, r
     return (text, ctx)
 
 
+async def polish_staff_reply(staff_text, question=""):
+    """پاسخِ خامِ همکار را به پیامِ گرم و حرفه‌ایِ مشتری‌پسند بازنویسی می‌کند (بدونِ افزودنِ اطلاعاتِ نادرست)."""
+    staff_text = (staff_text or "").strip()
+    if not staff_text:
+        return ""
+    sys = ("تو مشاورِ فروشِ فروشگاهِ نمونهی. همکارت پاسخِ کوتاهی به سؤالِ یک مشتری داده. این پاسخ را به یک پیامِ "
+           "گرم، مؤدبانه و فارسیِ روان برای همان مشتری بازنویسی کن. هیچ اطلاعاتِ تازه یا قیمت یا ادعای نادرستی "
+           "اضافه نکن — فقط همین پاسخ را زیبا و حرفه‌ای و کوتاه بیان کن. اگر پاسخِ همکار لینک/عدد دارد عیناً نگه دار.")
+    user = (f"سؤالِ مشتری: {question}\n" if question else "") + f"پاسخِ همکار: {staff_text}"
+    try:
+        out = await llm.chat([{"role": "system", "content": sys}, {"role": "user", "content": user}], {})
+        return textfmt.clean_for_chat(out) or staff_text
+    except Exception as e:  # noqa: BLE001
+        print(f"[assistant] polish_staff_reply ناموفق: {type(e).__name__}: {e}")
+        return staff_text
+
+
 async def answer_image(image_data_url, caption="", messages=None, render_cards_inline=True):
     """تشخیصِ عکسِ ساعت (بدونِ حالت/session) برای همهٔ کانال‌ها — مثلِ answer_messages ولی با تصویر.
 
     خروجی: (text, ctx) که ctx['cards'] محصولاتِ پیشنهادی را دارد."""
     user_text = (caption or "").strip()
     user_text = (user_text + "\n\n").strip() + (
-        "\nابتدا تشخیص بده این تصویر چیست:\n"
+        "\nابتدا تصویر را با دقت بررسی کن و فقط وقتی **۹۰٪+ مطمئنی** اقدام کن:\n"
         "• اگر **فیش/رسیدِ پرداختِ بانکی** است: جستجوی ساعت نکن؛ بگو «رسیدِ پرداختتون دریافت شد ✅ "
         "همکاران بررسی می‌کنن و نتیجهٔ تأیید رو خدمتتون اعلام می‌کنیم 🙏»، و اگر مبلغ/تاریخ/شمارهٔ پیگیری خواناست کوتاه بازگو کن.\n"
-        "• اگر **ساعت** است: شناسایی‌اش کن (جنسیت، رنگ، استایل، برند اگر پیداست) و با search_watches "
-        "همان یا مشابه‌هایش را پیدا کن، بعد حتماً با show_products به‌صورت کارت نشان بده.\n"
-        "• در غیرِ این صورت مؤدبانه بپرس چطور می‌توانی کمک کنی.")
+        "• اگر **ساعت** است و با اطمینان تشخیصش دادی: با search_watches همان یا مشابه‌هایش را پیدا کن، "
+        "بعد حتماً با show_products به‌صورت کارت نشان بده.\n"
+        "• اگر **مطمئن نیستی** (برند/مدل واضح نیست، تصویر مبهم است، یا مطمئن نیستی موجود داریم): "
+        "**محصولِ حدسی نشان نده**؛ فقط بگو «عکستون رو دیدم، برای دقت از همکارانم می‌پرسم و جوابتون رو می‌فرستم 🙏» "
+        "(تا به گروهِ همکاران ارجاع شود). هرگز محصول یا برندِ اشتباه به مشتری نسبت نده.")
     convo = [{"role": "system", "content": persona.system_prompt()}]
     for m in (messages or []):
         role = m.get("role")
