@@ -170,6 +170,41 @@ async def answer_messages(messages, system_extra="", render_cards_inline=True, r
     return (text, ctx)
 
 
+async def answer_image(image_data_url, caption="", messages=None, render_cards_inline=True):
+    """تشخیصِ عکسِ ساعت (بدونِ حالت/session) برای همهٔ کانال‌ها — مثلِ answer_messages ولی با تصویر.
+
+    خروجی: (text, ctx) که ctx['cards'] محصولاتِ پیشنهادی را دارد."""
+    user_text = (caption or "").strip()
+    user_text = (user_text + " ").strip() + (
+        " این ساعت را از روی تصویر شناسایی کن (جنسیت، رنگ، استایل، برند اگر پیداست) و با "
+        "search_watches همان یا مشابه‌هایش را پیدا کن، بعد حتماً با show_products به‌صورت کارت نشان بده.")
+    convo = [{"role": "system", "content": persona.system_prompt()}]
+    for m in (messages or []):
+        role = m.get("role")
+        content = (m.get("content") or "").strip()
+        if role in ("user", "assistant") and content:
+            convo.append({"role": role, "content": content})
+    convo.append({"role": "user", "content": [
+        {"type": "text", "text": user_text},
+        {"type": "image_url", "image_url": {"url": image_data_url}},
+    ]})
+    ctx: dict = {}
+    try:
+        text = await llm.chat(convo, ctx)
+    except Exception as e:  # noqa: BLE001
+        print(f"[assistant] خطا در answer_image: {type(e).__name__}: {e}")
+        text = ""
+    text = textfmt.clean_for_chat(text)
+    cards = ctx.get("cards") or []
+    _intro = "چند ساعتِ نزدیک به تصویری که فرستادید پیدا کردم 🌟 ببینید:"
+    if cards and render_cards_inline:
+        intro = textfmt.strip_product_lines(text) or _intro
+        text = (intro + "\n\n" + _cards_as_text(cards)).strip()
+    elif cards:
+        text = textfmt.strip_product_lines(text) or _intro
+    return (text, ctx)
+
+
 def _cards_as_text(cards):
     out = []
     for c in cards:

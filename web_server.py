@@ -124,6 +124,37 @@ async def brain_chat(body: BrainChatIn, x_sb_token: str = Header(None, alias="X-
     }
 
 
+class VisionIn(BaseModel):
+    image_b64: str = ""      # بایتِ تصویر به base64 (کانال‌ها این را می‌فرستند)
+    image_url: str = ""      # یا یک data-url/http-url مستقیم
+    mime: str = "image/jpeg"
+    caption: str = ""
+    messages: list = []
+    cards_as_text: bool = True
+
+
+@app.post("/api/vision")
+async def brain_vision(body: VisionIn, x_sb_token: str = Header(None, alias="X-SB-Token")):
+    """تشخیصِ عکسِ ساعت → جستجو و کارت. منبعِ واحد برای همهٔ کانال‌ها."""
+    _check_sb_token(x_sb_token)
+    data_url = ""
+    if body.image_b64:
+        data_url = f"data:{body.mime or 'image/jpeg'};base64," + body.image_b64.strip()
+    elif body.image_url:
+        data_url = body.image_url.strip()
+    if not data_url:
+        raise HTTPException(status_code=400, detail="no image")
+    text, ctx = await assistant.answer_image(
+        data_url, body.caption, body.messages, render_cards_inline=body.cards_as_text)
+    handoff = ctx.get("handoff")
+    return {
+        "text": text,
+        "cards": ctx.get("cards") or [],
+        "handoff": bool(handoff),
+        "handoff_reason": (handoff or {}).get("reason", "") if handoff else "",
+    }
+
+
 class TranscribeIn(BaseModel):
     audio_b64: str = ""
     filename: str = "voice.ogg"
