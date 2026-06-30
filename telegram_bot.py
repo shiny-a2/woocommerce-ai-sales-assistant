@@ -495,6 +495,8 @@ async def post_staff_escalation(bot, image_bytes, channel, customer_id, name="",
 _IG_URL_RE = re.compile(r"https?://(?:www\.)?instagram\.com/\S+", re.I)
 _TRIG_RE = re.compile(r"^(?:تریگر|trigger|کلمه|کلمات)\s*[:：]\s*(.+)$", re.I)
 _MSG_RE = re.compile(r"^(?:پیام|متن|dm|message)\s*[:：]\s*(.+)$", re.I)
+_REPLY_RE = re.compile(r"^(?:کامنت|comment|ریپلای)\s*[:：]\s*(.+)$", re.I)
+_FOLLOW_RE = re.compile(r"^(?:فالو|follow|گیت|gate)\s*[:：]\s*(.+)$", re.I)
 _STORY_MARK_RE = re.compile(r"(?:^|\n|\s)(?:استوری|story)\b", re.I)
 _pending_campaign_link = {}  # chat_id → لینکِ اینستاگرام (لینک آمده، منتظرِ متنِ دایرکت)
 
@@ -522,24 +524,34 @@ def _parse_campaign_msg(cur_text, reply_text):
         return None  # نه لینک، نه مارکرِ استوری → گفتگوی عادیِ گروه
     # متن از پیامِ فعلی (لینک‌زدوده)؛ اگر فعلی فقط لینک/مارکر بود، از پیامِ ریپلای‌شده
     src = _IG_URL_RE.sub("", cur_text or "").strip() or _IG_URL_RE.sub("", reply_text or "").strip()
-    body_lines = []
+    body_lines, creply, gate = [], "", False
     for ln in src.split("\n"):
         s = ln.strip()
         if not s or _TRIG_RE.match(s):
             continue  # خطِ تریگر بالا جداگانه استخراج شد
         if re.match(r"^(?:استوری|story)\s*$", s, re.I):
             continue  # خطِ مارکرِ «استوری» جزوِ متن نیست
+        mr = _REPLY_RE.match(s)
+        if mr:
+            creply = mr.group(1).strip()  # «کامنت:» → ریپلایِ عمومی + لایک
+            continue
+        mf = _FOLLOW_RE.match(s)
+        if mf:
+            gate = mf.group(1).strip().lower() in ("روشن", "بله", "on", "yes", "1", "فعال", "true")
+            continue
         mm = _MSG_RE.match(s)
         body_lines.append(mm.group(1).strip() if mm else s)
-    return {"kind": kind, "link": link, "trigger": trigger, "message": "\n".join(body_lines).strip()}
+    return {"kind": kind, "link": link, "trigger": trigger, "message": "\n".join(body_lines).strip(),
+            "reply_text": creply, "gate": gate}
 
 
-async def _post_ig_campaign(link, trigger, message, by="", kind="comment"):
+async def _post_ig_campaign(link, trigger, message, by="", kind="comment", reply_text="", gate=False):
     try:
         async with httpx.AsyncClient(timeout=15) as c:
             r = await c.post(
                 config.IG_CAMPAIGN_URL,
-                json={"kind": kind, "link": link, "trigger": trigger, "message": message, "by": by},
+                json={"kind": kind, "link": link, "trigger": trigger, "message": message,
+                      "by": by, "reply_text": reply_text, "gate": gate},
                 headers={"X-SB-Token": config.SALE_BRAIN_TOKEN},
             )
             return r.status_code == 200 and bool(r.json().get("ok"))
@@ -574,12 +586,19 @@ async def _handle_ig_campaign_group(m):
         return
     _pending_campaign_link.pop(m.chat_id, None)
     by = str(m.from_user.id) if m.from_user else ""
-    ok = await _post_ig_campaign(parsed["link"], parsed["trigger"], parsed["message"], by, parsed["kind"])
+    ok = await _post_ig_campaign(parsed["link"], parsed["trigger"], parsed["message"], by, parsed["kind"],
+                                 parsed.get("reply_text", ""), parsed.get("gate", False))
     if ok:
         tg = parsed["trigger"] or "همهٔ کامنت‌ها"
         knd = "استوری/پست (ریپلایِ کلمه/عدد)" if parsed["kind"] == "story" else "کامنتِ پست"
         head = f"🔗 {parsed['link']}\n" if parsed["link"] else ""
-        await m.reply_text(f"✅ کمپین ثبت و فوری فعال شد\n📌 نوع: {knd}\n{head}🎯 تریگر: {tg}\n💬 آماده‌ست — نیازی به روشن‌کردنِ دستی نیست.")
+        extra = ""
+        if parsed.get("gate"):
+            extra += "\n🔒 فالوگیت: روشن (اول فالو، بعد متن)"
+        if parsed.get("reply_text"):
+            extra += "\n💬 ریپلای+لایکِ کامنت: «" + parsed["reply_text"][:40] + "»"
+        await m.reply_text(f"✅ کمپین ثبت و فوری فعال شد\n📌 نوع: {knd}\n{head}🎯 تریگر: {tg}{extra}\n"
+                           "آماده‌ست — نیازی به روشن‌کردنِ دستی نیست.")
     else:
         await m.reply_text("ثبتِ کمپین ناموفق بود 🙏 سرویسِ اینستاگرام در دسترس نبود.")
 
