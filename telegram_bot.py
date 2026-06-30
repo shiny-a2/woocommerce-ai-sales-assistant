@@ -514,7 +514,8 @@ def _parse_campaign_msg(cur_text, reply_text):
             if mt:
                 trigger = mt.group(1).strip()
     if um:
-        link, kind = um.group(0).rstrip(".،,)"), "comment"
+        link = um.group(0).rstrip(".،,)")
+        kind = "story" if "/stories/" in link.lower() else "comment"  # لینکِ استوری → کمپینِ استوری
     elif _STORY_MARK_RE.search(combined):
         link, kind = "", "story"
     else:
@@ -565,8 +566,8 @@ async def _handle_ig_campaign_group(m):
         await m.reply_text("🔗 لینک گرفته شد. حالا در همین گروه، متنی که باید به کامنت‌گذارها دایرکت بشه رو بنویس "
                            "(و در صورتِ نیاز یک خطِ «تریگر: کلمه»).")
         return
-    if parsed["kind"] == "story" and not parsed["trigger"]:
-        await m.reply_text("برای کمپینِ استوری، یک خطِ «تریگر: کلمه‌یا‌عدد» لازمه (مثلاً «تریگر: ۲»).")
+    if parsed["kind"] == "story" and not parsed["trigger"] and not parsed["link"]:
+        await m.reply_text("برای کمپینِ استوری، یا لینکِ استوری رو بفرست، یا یک خطِ «تریگر: کلمه‌یا‌عدد» (مثلاً «تریگر: ۲»).")
         return
     if not parsed["message"]:
         await m.reply_text("متنِ دایرکت خالیه 🙏 متنی که باید فرستاده بشه رو بنویس.")
