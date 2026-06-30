@@ -426,23 +426,26 @@ def site_search_link(gender=None, style=None, dial_color=None, strap_color=None,
 async def search_watches(gender=None, movement=None, dial_color=None, strap_color=None,
                          case_color=None, strap_material=None, brand=None, style=None,
                          min_toman=None, max_toman=None, target_toman=None, query=None,
-                         on_sale=False, in_stock_only=True, limit=7, exclude_ids=None):
+                         on_sale=False, in_stock_only=True, limit=7, exclude_ids=None,
+                         newest=False):
     """جستجوی ساعت با تشخیص درست جنسیت (دسته+عنوان) و مشخصات فنی (ویژگی).
 
     یک فیلترِ گزینشی (رنگ/موتور/برند) را مبنای کوئری می‌گذارد، بعد در پایتون
     بر اساس جنسیت/استایل/قیمت پالایش می‌کند تا محدودیت تک‌ویژگیِ ووکامرس دور بخورد.
     target_toman: اگر مشتری یک قیمتِ تکی داد (بدون بازه)، بازه = ۱۰٪ پایین‌تر تا ۱۵٪ بالاتر.
     exclude_ids: محصولاتی که قبلاً نشان داده شده‌اند (برای نتایجِ غیرتکراری).
+    newest: «مدلِ جدید/جدیدترین» → مرتب‌سازی بر اساسِ تاریخِ درجِ محصول (جدید به قدیم).
     """
     # یک عددِ تکی → بازه‌ی هوشمند
     if target_toman and not min_toman and not max_toman:
         min_toman = int(int(target_toman) * 0.90)
         max_toman = int(int(target_toman) * 1.15)
-    # نرمال‌سازیِ جنسِ بند (فلزی→استیل، چرمی→چرم، …)
+    # نرمال‌سازیِ جنسِ بند (فلزی→استیل, چرمی→چرم, …)
     if strap_material:
         strap_material = _STRAP_MAT.get(strap_material.strip(), strap_material.strip())
 
-    params = {"status": "publish", "orderby": "popularity", "order": "desc", "per_page": 60}
+    params = {"status": "publish", "orderby": "date" if newest else "popularity",
+              "order": "desc", "per_page": 60}
     if in_stock_only:
         params["stock_status"] = "instock"
     if on_sale:
@@ -534,7 +537,11 @@ async def search_watches(gender=None, movement=None, dial_color=None, strap_colo
     def _jewel(p):
         return any(("جواهرتایم" in g) or ("جواهر تایم" in g) for g in attr_options(p, "گارانتی کننده در ایران"))
 
-    rows.sort(key=lambda r: (0 if r[0].get("shipping_time") == "ارسال فوری" else 1, 0 if _jewel(r[1]) else 1))
+    # برای «مدلِ جدید» ترتیبِ تاریخِ درج (که از API آمده) حفظ شود؛ فقط ارسال‌فوری‌ها جلو بیایند.
+    if newest:
+        rows.sort(key=lambda r: 0 if r[0].get("shipping_time") == "ارسال فوری" else 1)
+    else:
+        rows.sort(key=lambda r: (0 if r[0].get("shipping_time") == "ارسال فوری" else 1, 0 if _jewel(r[1]) else 1))
 
     return [b for (b, _) in rows][: max(3, int(limit or 7))]
 

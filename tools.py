@@ -82,6 +82,7 @@ SCHEMAS = [
                     "max_toman": {"type": "integer", "description": "حداکثر بودجه اگر مشتری بازه داد"},
                     "target_toman": {"type": "integer", "description": "اگر مشتری فقط یک قیمت گفت (نه بازه)، همان را اینجا بده؛ خودش بازه‌ی ۱۰٪ پایین تا ۱۵٪ بالا می‌سازد"},
                     "on_sale": {"type": "boolean", "description": "اگر مشتری «تخفیف‌خورده/حراج/آف» خواست true بده"},
+                    "newest": {"type": "boolean", "description": "اگر مشتری «مدلِ جدید/جدیدترین/تازه‌ترین/مدل‌های جدید» خواست true بده؛ بر اساسِ تاریخِ درجِ محصول (جدید به قدیم) مرتب می‌شود"},
                     "query": {"type": "string", "description": "کلمه‌ی آزاد اگر معیار دیگری بود"},
                     "limit": {"type": "integer", "description": "تعداد نتیجه: نوبت اول ۷، بعد ۵، بعد ۳"},
                 },
@@ -263,6 +264,7 @@ async def dispatch(name, args_json, ctx):
                 target_toman=args.get("target_toman"),
                 query=args.get("query"),
                 on_sale=bool(args.get("on_sale")),
+                newest=bool(args.get("newest")),
                 limit=args.get("limit", 7),
                 exclude_ids=ctx.get("shown_ids") or [],
             )
