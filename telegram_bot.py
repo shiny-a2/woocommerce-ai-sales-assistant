@@ -5,6 +5,7 @@ import asyncio
 import base64
 import json
 import os
+import re
 
 import httpx
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
@@ -491,16 +492,111 @@ async def post_staff_escalation(bot, image_bytes, channel, customer_id, name="",
         return False
 
 
+_IG_URL_RE = re.compile(r"https?://(?:www\.)?instagram\.com/\S+", re.I)
+_TRIG_RE = re.compile(r"^(?:تریگر|trigger|کلمه|کلمات)\s*[:：]\s*(.+)$", re.I)
+_MSG_RE = re.compile(r"^(?:پیام|متن|dm|message)\s*[:：]\s*(.+)$", re.I)
+_STORY_MARK_RE = re.compile(r"(?:^|\n|\s)(?:استوری|story)\b", re.I)
+_pending_campaign_link = {}  # chat_id → لینکِ اینستاگرام (لینک آمده، منتظرِ متنِ دایرکت)
+
+
+def _parse_campaign_msg(cur_text, reply_text):
+    """از پیامِ گروهِ کمپین: {kind, link, trigger, message}.
+    - اگر لینکِ اینستاگرام باشد → kind=comment (کامنت‌های آن پست).
+    - اگر لینک نباشد ولی «استوری» اعلام شده باشد → kind=story (ریپلایِ کلمه/عدد).
+    تریگر از هر دو پیام جست‌وجو می‌شود تا اگر در پیامِ لینک تایپ شده باشد گم نشود."""
+    combined = (cur_text or "") + "\n" + (reply_text or "")
+    um = _IG_URL_RE.search(combined)
+    # تریگر از هر دو پیام
+    trigger = ""
+    for txt in (cur_text or "", reply_text or ""):
+        for ln in _IG_URL_RE.sub("", txt).split("\n"):
+            mt = _TRIG_RE.match(ln.strip())
+            if mt:
+                trigger = mt.group(1).strip()
+    if um:
+        link, kind = um.group(0).rstrip(".،,)"), "comment"
+    elif _STORY_MARK_RE.search(combined):
+        link, kind = "", "story"
+    else:
+        return None  # نه لینک، نه مارکرِ استوری → گفتگوی عادیِ گروه
+    # متن از پیامِ فعلی (لینک‌زدوده)؛ اگر فعلی فقط لینک/مارکر بود، از پیامِ ریپلای‌شده
+    src = _IG_URL_RE.sub("", cur_text or "").strip() or _IG_URL_RE.sub("", reply_text or "").strip()
+    body_lines = []
+    for ln in src.split("\n"):
+        s = ln.strip()
+        if not s or _TRIG_RE.match(s):
+            continue  # خطِ تریگر بالا جداگانه استخراج شد
+        if re.match(r"^(?:استوری|story)\s*$", s, re.I):
+            continue  # خطِ مارکرِ «استوری» جزوِ متن نیست
+        mm = _MSG_RE.match(s)
+        body_lines.append(mm.group(1).strip() if mm else s)
+    return {"kind": kind, "link": link, "trigger": trigger, "message": "\n".join(body_lines).strip()}
+
+
+async def _post_ig_campaign(link, trigger, message, by="", kind="comment"):
+    try:
+        async with httpx.AsyncClient(timeout=15) as c:
+            r = await c.post(
+                config.IG_CAMPAIGN_URL,
+                json={"kind": kind, "link": link, "trigger": trigger, "message": message, "by": by},
+                headers={"X-SB-Token": config.SALE_BRAIN_TOKEN},
+            )
+            return r.status_code == 200 and bool(r.json().get("ok"))
+    except Exception as e:  # noqa: BLE001
+        print(f"[tg] POST کمپینِ اینستاگرام ناموفق: {type(e).__name__}: {e}")
+        return False
+
+
+async def _handle_ig_campaign_group(m):
+    """گروهِ کمپین: لینکِ پست (+متن) یا «استوری + تریگر + متن» → ثبت و فعال‌سازیِ آنیِ کمپین."""
+    cur = (m.text or m.caption or "").strip()
+    rep = ""
+    if m.reply_to_message:
+        rep = (m.reply_to_message.text or m.reply_to_message.caption or "").strip()
+    parsed = _parse_campaign_msg(cur, rep)
+    # اگر این پیام لینک/مارکر نداشت ولی قبلاً لینک گرفته بودیم، با لینکِ ذخیره‌شده ترکیب کن
+    if not parsed and cur and m.chat_id in _pending_campaign_link:
+        parsed = _parse_campaign_msg(_pending_campaign_link[m.chat_id] + "\n" + cur, rep)
+    if not parsed:
+        return  # گفتگوی عادیِ گروه → نادیده
+    if parsed["kind"] == "comment" and not parsed["message"]:
+        # فقط لینک آمده → ذخیره و منتظرِ متن (نیازی به ریپلای نیست)
+        _pending_campaign_link[m.chat_id] = parsed["link"]
+        await m.reply_text("🔗 لینک گرفته شد. حالا در همین گروه، متنی که باید به کامنت‌گذارها دایرکت بشه رو بنویس "
+                           "(و در صورتِ نیاز یک خطِ «تریگر: کلمه»).")
+        return
+    if parsed["kind"] == "story" and not parsed["trigger"]:
+        await m.reply_text("برای کمپینِ استوری، یک خطِ «تریگر: کلمه‌یا‌عدد» لازمه (مثلاً «تریگر: ۲»).")
+        return
+    if not parsed["message"]:
+        await m.reply_text("متنِ دایرکت خالیه 🙏 متنی که باید فرستاده بشه رو بنویس.")
+        return
+    _pending_campaign_link.pop(m.chat_id, None)
+    by = str(m.from_user.id) if m.from_user else ""
+    ok = await _post_ig_campaign(parsed["link"], parsed["trigger"], parsed["message"], by, parsed["kind"])
+    if ok:
+        tg = parsed["trigger"] or "همهٔ کامنت‌ها"
+        knd = "استوری/پست (ریپلایِ کلمه/عدد)" if parsed["kind"] == "story" else "کامنتِ پست"
+        head = f"🔗 {parsed['link']}\n" if parsed["link"] else ""
+        await m.reply_text(f"✅ کمپین ثبت و فوری فعال شد\n📌 نوع: {knd}\n{head}🎯 تریگر: {tg}\n💬 آماده‌ست — نیازی به روشن‌کردنِ دستی نیست.")
+    else:
+        await m.reply_text("ثبتِ کمپین ناموفق بود 🙏 سرویسِ اینستاگرام در دسترس نبود.")
+
+
 async def _on_group(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """پیام‌های گروه: لاگِ آیدی (برای پیکربندی) + دریافتِ مدیای همکار و تحویل."""
     m = update.effective_message
     if not m or not m.chat or m.chat.type not in ("group", "supergroup"):
         return
     # آیدیِ هر گروهِ ناشناخته را یک‌بار لاگ کن (برای پیکربندیِ STAFF/SUPPORT/ORDERS_GROUP_ID)
-    known = {config.STAFF_GROUP_ID, config.SUPPORT_GROUP_ID, config.ORDERS_GROUP_ID}
+    known = {config.STAFF_GROUP_ID, config.SUPPORT_GROUP_ID, config.ORDERS_GROUP_ID, config.IG_CAMPAIGN_GROUP_ID}
     if m.chat_id not in known and m.chat_id not in _logged_groups:
         _logged_groups.add(m.chat_id)
         print(f"[tg] گروه شناسایی شد → id={m.chat_id} | {m.chat.title}")
+    # گروهِ کنترلِ کمپینِ اینستاگرام: لینکِ پست + متن → ثبتِ کمپینِ کامنت→دایرکت
+    if config.IG_CAMPAIGN_GROUP_ID and m.chat_id == config.IG_CAMPAIGN_GROUP_ID:
+        await _handle_ig_campaign_group(m)
+        return
     # ریپلایِ همکار روی «ارجاعِ عکس» → پاسخ به مشتری در همان کانال (متن)
     if config.STAFF_GROUP_ID and m.chat_id == config.STAFF_GROUP_ID and m.reply_to_message:
         esc = _escalations.get(m.reply_to_message.message_id)

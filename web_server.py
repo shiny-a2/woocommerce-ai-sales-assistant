@@ -150,7 +150,7 @@ async def brain_vision(body: VisionIn, x_sb_token: str = Header(None, alias="X-S
     if not data_url:
         raise HTTPException(status_code=400, detail="no image")
     text, ctx = await assistant.answer_image(
-        data_url, body.caption, body.messages, render_cards_inline=body.cards_as_text)
+        data_url, body.caption, body.messages, render_cards_inline=body.cards_as_text, customer=body.customer)
     receipt = ctx.get("receipt")
     cards = ctx.get("cards") or []
     escalated = False

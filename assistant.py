@@ -72,7 +72,10 @@ async def reply_image(channel, user_id, image_data_url, caption="", user_name=No
     """پاسخ به یک تصویر ساعت: شناسایی و پیشنهاد همان/مشابه‌ها."""
     ctx: dict = {"shown_ids": list(sessions.shown_ids(channel, user_id))}
     user_text = ((caption or "").strip() + " ").strip()
-    user_text += " این ساعت را از روی تصویر شناسایی کن (جنسیت، رنگ، استایل، برند اگر پیداست) و با search_watches همان یا مشابه‌هایش را پیدا کن، بعد حتماً با show_products به‌صورت کارت نشان بده."
+    user_text += (" ابتدا تصویر را بررسی کن: اگر **فیش/رسیدِ پرداختِ بانکی** است (نه ساعت)، جستجوی ساعت نکن"
+                  " و حتماً ابزارِ payment_receipt را صدا بزن، بعد بگو «رسیدِ پرداختتون دریافت شد ✅ همکاران بررسی"
+                  " می‌کنن و نتیجهٔ تأیید رو خدمتتون اعلام می‌کنیم 🙏»، و اگر مبلغ/تاریخ/شمارهٔ پیگیری خواناست کوتاه بازگو کن.")
+    user_text += " اما اگر **ساعت** است: این ساعت را از روی تصویر شناسایی کن (جنسیت، رنگ، استایل، برند اگر پیداست) و با search_watches همان یا مشابه‌هایش را پیدا کن، بعد حتماً با show_products به‌صورت کارت نشان بده."
     user_text += (" اما اگر روشن است که ساعت است ولی **مطمئن نیستی زنانه است یا مردانه**"
                   " (مثلاً قابِ متوسط یا مدلی بینِ زنانه و مردانه)، **هیچ ساعتی نشان نده، گمانه‌زنی نکن و سراغِ همکاران نرو**؛"
                   " رنگ/استایل/برندی که از تصویر فهمیدی را کوتاه بگو و حتماً همین عبارت را در سؤالت بیاور:"
@@ -99,8 +102,11 @@ async def reply_image(channel, user_id, image_data_url, caption="", user_name=No
     if ctx.get("cards"):
         answer = textfmt.strip_product_lines(answer) or "چند ساعتِ نزدیک به تصویری که فرستادید پیدا کردم 🌟 ببینید:"
 
-    # اگر فقط جنسیت را پرسیده (نه کارت، نه رسید) → فلگ بزن تا ساختار ارجاع‌به‌همکاران رخ ندهد
-    if not ctx.get("cards") and not ctx.get("receipt") and "برای خانم می‌خواید یا آقا" in (answer or ""):
+    # اگر فقط جنسیت را پرسیده (نه کارت، نه رسید) → فلگ بزن تا ساختار ارجاع‌به‌همکاران رخ ندهد.
+    # تشخیصِ متحمل (مستقل از ترتیب/جمله‌بندی): هر دو واژهٔ «خانم» و «آقا» + علامتِ سؤال.
+    _gq = answer or ""
+    if (not ctx.get("cards") and not ctx.get("receipt")
+            and "خانم" in _gq and "آقا" in _gq and ("؟" in _gq or "?" in _gq)):
         ctx["ask_gender"] = True
     sessions.append(channel, user_id, "user", "[تصویر ساعت] " + (caption or ""))
     sessions.append(channel, user_id, "assistant", answer)
@@ -217,7 +223,7 @@ async def polish_staff_reply(staff_text, question=""):
         return staff_text
 
 
-async def answer_image(image_data_url, caption="", messages=None, render_cards_inline=True):
+async def answer_image(image_data_url, caption="", messages=None, render_cards_inline=True, customer=None):
     """تشخیصِ عکسِ ساعت (بدونِ حالت/session) برای همهٔ کانال‌ها — مثلِ answer_messages ولی با تصویر.
 
     خروجی: (text, ctx) که ctx['cards'] محصولاتِ پیشنهادی را دارد."""
@@ -245,6 +251,10 @@ async def answer_image(image_data_url, caption="", messages=None, render_cards_i
         {"type": "image_url", "image_url": {"url": image_data_url}},
     ]})
     ctx: dict = {}
+    # عدمِ‌تکرارِ کارت per (channel,user) مثلِ مسیرِ متن (اگر کانال customer داد)
+    _ck = (str(customer.get("channel") or "ch"), str(customer.get("id"))) if (customer and customer.get("id")) else None
+    if _ck:
+        ctx["shown_ids"] = list(sessions.shown_ids(_ck[0], _ck[1]))
     try:
         text = await llm.chat(convo, ctx)
     except Exception as e:  # noqa: BLE001
@@ -258,9 +268,13 @@ async def answer_image(image_data_url, caption="", messages=None, render_cards_i
         text = (intro + "\n\n" + _cards_as_text(cards)).strip()
     elif cards:
         text = textfmt.strip_product_lines(text) or _intro
-    # فقط سؤالِ جنسیت پرسیده شده (نه کارت/رسید) → فلگ بزن تا ساختار ارجاع‌به‌همکاران رخ ندهد
-    if not cards and not ctx.get("receipt") and "برای خانم می‌خواید یا آقا" in (text or ""):
+    # فقط سؤالِ جنسیت پرسیده شده (نه کارت/رسید) → فلگ بزن تا ساختار ارجاع‌به‌همکاران رخ ندهد (تشخیصِ متحمل)
+    _gq = text or ""
+    if (not cards and not ctx.get("receipt")
+            and "خانم" in _gq and "آقا" in _gq and ("؟" in _gq or "?" in _gq)):
         ctx["ask_gender"] = True
+    if _ck and cards:  # ثبتِ کارت‌های تصویری در همان مخزنِ shown_ids (عدمِ‌تکرار با مسیرِ متن)
+        sessions.add_shown(_ck[0], _ck[1], [c.get("id") for c in cards if c.get("id")])
     return (text, ctx)
 
 
