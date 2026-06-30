@@ -73,6 +73,11 @@ async def reply_image(channel, user_id, image_data_url, caption="", user_name=No
     ctx: dict = {"shown_ids": list(sessions.shown_ids(channel, user_id))}
     user_text = ((caption or "").strip() + " ").strip()
     user_text += " این ساعت را از روی تصویر شناسایی کن (جنسیت، رنگ، استایل، برند اگر پیداست) و با search_watches همان یا مشابه‌هایش را پیدا کن، بعد حتماً با show_products به‌صورت کارت نشان بده."
+    user_text += (" اما اگر روشن است که ساعت است ولی **مطمئن نیستی زنانه است یا مردانه**"
+                  " (مثلاً قابِ متوسط یا مدلی بینِ زنانه و مردانه)، **هیچ ساعتی نشان نده، گمانه‌زنی نکن و سراغِ همکاران نرو**؛"
+                  " رنگ/استایل/برندی که از تصویر فهمیدی را کوتاه بگو و حتماً همین عبارت را در سؤالت بیاور:"
+                  " «این ساعت رو برای خانم می‌خواید یا آقا؟»، و بعد از جوابِ مشتری با همان مشخصاتِ تصویر + جنسیت جستجو کن."
+                  " این فقط برای ابهامِ زنانه/مردانه است؛ اگر برند/مدل یا موجودی‌اش نامعلوم بود، مثلِ قبل به همکاران ارجاع بده.")
 
     messages = [{"role": "system", "content": persona.system_prompt()}]
     hint = _name_hint(user_name)
@@ -94,6 +99,9 @@ async def reply_image(channel, user_id, image_data_url, caption="", user_name=No
     if ctx.get("cards"):
         answer = textfmt.strip_product_lines(answer) or "چند ساعتِ نزدیک به تصویری که فرستادید پیدا کردم 🌟 ببینید:"
 
+    # اگر فقط جنسیت را پرسیده (نه کارت، نه رسید) → فلگ بزن تا ساختار ارجاع‌به‌همکاران رخ ندهد
+    if not ctx.get("cards") and not ctx.get("receipt") and "برای خانم می‌خواید یا آقا" in (answer or ""):
+        ctx["ask_gender"] = True
     sessions.append(channel, user_id, "user", "[تصویر ساعت] " + (caption or ""))
     sessions.append(channel, user_id, "assistant", answer)
     sessions.add_shown(channel, user_id, [c.get("id") for c in ctx.get("cards", [])])
@@ -220,6 +228,9 @@ async def answer_image(image_data_url, caption="", messages=None, render_cards_i
         "همکاران بررسی می‌کنن و نتیجهٔ تأیید رو خدمتتون اعلام می‌کنیم 🙏»، و اگر مبلغ/تاریخ/شمارهٔ پیگیری خواناست کوتاه بازگو کن.\n"
         "• اگر **ساعت** است و با اطمینان تشخیصش دادی: با search_watches همان یا مشابه‌هایش را پیدا کن، "
         "بعد حتماً با show_products به‌صورت کارت نشان بده.\n"
+        "• اگر **ساعت** است ولی **مطمئن نیستی زنانه است یا مردانه** (مثلاً قابِ متوسط یا مدلی بینِ زنانه و مردانه): "
+        "هیچ ساعتی نشان نده و حدس نزن؛ رنگ/استایلی که از تصویر فهمیدی را کوتاه بگو و حتماً این عبارت را در سؤالت بیاور "
+        "«این ساعت رو برای خانم می‌خواید یا آقا؟»، بعد از جواب با همان مشخصات + جنسیت جستجو کن (این یک سؤالِ کوتاه است، نه ارجاع به همکاران).\n"
         "• اگر **مطمئن نیستی** (برند/مدل واضح نیست، تصویر مبهم است، یا مطمئن نیستی موجود داریم): "
         "**محصولِ حدسی نشان نده**؛ فقط بگو «عکستون رو دیدم، برای دقت از همکارانم می‌پرسم و جوابتون رو می‌فرستم 🙏» "
         "(تا به گروهِ همکاران ارجاع شود). هرگز محصول یا برندِ اشتباه به مشتری نسبت نده.")
@@ -247,6 +258,9 @@ async def answer_image(image_data_url, caption="", messages=None, render_cards_i
         text = (intro + "\n\n" + _cards_as_text(cards)).strip()
     elif cards:
         text = textfmt.strip_product_lines(text) or _intro
+    # فقط سؤالِ جنسیت پرسیده شده (نه کارت/رسید) → فلگ بزن تا ساختار ارجاع‌به‌همکاران رخ ندهد
+    if not cards and not ctx.get("receipt") and "برای خانم می‌خواید یا آقا" in (text or ""):
+        ctx["ask_gender"] = True
     return (text, ctx)
 
 

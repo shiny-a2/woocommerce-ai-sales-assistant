@@ -700,7 +700,7 @@ async def _on_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await msg.reply_text("متأسفانه نتونستم عکس رو دریافت کنم 🙏 لطفاً یک‌بارِ دیگه ارسالش کنید.")
         return
     answer, ctx = await assistant.reply_image(CHANNEL, user.id, url, msg.caption or "", user_name=_full_name(user))
-    if not ctx.get("cards") and not ctx.get("receipt"):  # محصول از عکس پیدا نشد → ارجاع به همکاران
+    if not ctx.get("cards") and not ctx.get("receipt") and not ctx.get("ask_gender"):  # محصول پیدا نشد → ارجاع (مگر فقط جنسیت پرسیده باشد)
         if await post_staff_escalation(context.bot, data, "telegram", user.id, name=_full_name(user), question=(msg.caption or "")):
             await msg.reply_text("عکستون رو دیدم 🙏 همین الان از همکارانم می‌پرسم و تا چند دقیقهٔ دیگه جوابتون رو همین‌جا می‌فرستم 🌟")
             return
