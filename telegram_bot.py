@@ -593,10 +593,9 @@ async def _handle_ig_campaign_group(m):
         knd = "استوری/پست (ریپلایِ کلمه/عدد)" if parsed["kind"] == "story" else "کامنتِ پست"
         head = f"🔗 {parsed['link']}\n" if parsed["link"] else ""
         extra = ""
-        if parsed.get("gate"):
-            extra += "\n🔒 فالوگیت: روشن (اول فالو، بعد متن)"
         if parsed.get("reply_text"):
             extra += "\n💬 ریپلای+لایکِ کامنت: «" + parsed["reply_text"][:40] + "»"
+        extra += "\n🔒 فالوگیت سراسری است (روشن/خاموش از داشبورد) — نیازی به نوشتنش نیست."
         await m.reply_text(f"✅ کمپین ثبت و فوری فعال شد\n📌 نوع: {knd}\n{head}🎯 تریگر: {tg}{extra}\n"
                            "آماده‌ست — نیازی به روشن‌کردنِ دستی نیست.")
     else:
